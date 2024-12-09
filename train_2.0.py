@@ -14,9 +14,13 @@ import wandb
 import config
 import argparse
 import datetime
+import functools 
+
+
 
 
 if __name__ == "__main__":
+
 
     torch.multiprocessing.set_sharing_strategy('file_system') 
 
@@ -28,11 +32,12 @@ if __name__ == "__main__":
     #parser.add_argument("--save_name", help="name of the model to save", type=str)
 
     args = parser.parse_args()
+    args.device_id = 0
+    args.datasets = "MSSEG"
+    args.randomly_drop = 0
+
     randomly_drop = bool(args.randomly_drop)
 
-    args.device_id = 0
-    args.datasets = "TBI"
-    args.randomly_drop = 0
    
     #load config
     train_config = config.Training_config()
@@ -149,8 +154,9 @@ if __name__ == "__main__":
 
     metric_values = list()
 
-    #training
+    # #training
     for epoch in range(epoched,epochs):
+
         print("-" * 10)
         print(f"epoch {epoch + 1}/{epochs}")
         model.train()
@@ -226,7 +232,7 @@ if __name__ == "__main__":
         if (epoch+1) % 50 == 0:            
             model_save_name = model_save_path + "_random_drop_" + str(args.randomly_drop)+ '_' + date + "_Epoch_" + str(epoch) + ".pth"
             opt_save_name=model_save_path + "_random_drop_" + str(args.randomly_drop)+ '_' + date + "_checkpoint_Epoch_" + str(epoch) + ".pt"
-            torch.save(model.state_dict(), model_save_name)
+            torch.save(model.dice(), model_save_name)
             torch.save({
             'epoch': epoch,
             'model_state_dict': model.state_dict(),
@@ -236,60 +242,61 @@ if __name__ == "__main__":
             print("Saved Model")
             
         # validation
-        if (epoch + 1) % train_config.val_interval == 0:
-            model.eval()
-            with torch.no_grad():
-                seg_channel = 0
-                val_images = None
-                val_labels = None
-                val_outputs = None
-                metric={}
+    epoch = 1
+    if (epoch + 1) % train_config.val_interval == 0:
+        model.eval()
+        with torch.no_grad():
+            seg_channel = 0
+            val_images = None
+            val_labels = None
+            val_outputs = None
+            metric={}
+            dice_metric.reset()
+            sensitivity_metric.reset()
+            precision_metric.reset()                
+            IOU_metric.reset()                
+            for dataset in datasetlist:
+                metric[dataset]={}
+                loader_index = data_loader_map[dataset]
+                for val_data in val_loader[dataset]:
+                    #batch = val_data[loader_index]                       
+                    input_data = torch.from_numpy(np.zeros((1,len(total_modalities),val_data[0].shape[2],val_data[0].shape[3],val_data[0].shape[4]),dtype=np.float32))
+                    input_data[:,channel_map[dataset],:,:,:] = val_data[0]
+                    input_data = input_data.to(device)
+                    if dataset == "BRATS" and train_config.BRATS_two_channel_seg:
+                        label = val_data[1][:,[0],:,:,:].to(device)                      
+                    else:                        
+                        label = val_data[1].to(device)                        
+                    roi_size = (cropped_input_size[0], cropped_input_size[1], cropped_input_size[2])
+                    sw_batch_size = 1
+                    #using sliding window for the whole 3D image
+                    val_outputs = sliding_window_inference(input_data, roi_size, sw_batch_size, model)
+                    val_outputs = [post_trans(i) for i in decollate_batch(val_outputs)]
+                    # compute metric for current iteration
+                    dice_metric(y_pred=val_outputs, y=label)
+                    sensitivity_metric(y_pred=val_outputs, y=label)
+                    precision_metric(y_pred=val_outputs, y=label)                        
+                    IOU_metric(y_pred=val_outputs, y=label)           
+                metric[dataset]["dice"] = dice_metric.aggregate().item()
+                metric[dataset]["sensitivity"] = sensitivity_metric.aggregate()[0].item()
+                metric[dataset]["precision"] = precision_metric.aggregate()[0].item()                    
+                metric[dataset]["IOU"] = IOU_metric.aggregate().item()            
                 dice_metric.reset()
                 sensitivity_metric.reset()
-                precision_metric.reset()                
-                IOU_metric.reset()                
-                for dataset in datasetlist:
-                    metric[dataset]={}
-                    loader_index = data_loader_map[dataset]
-                    for val_data in val_loader[dataset]:
-                        # batch = val_data[loader_index]                       
-                        input_data = torch.from_numpy(np.zeros((1,len(total_modalities),val_data[0].shape[2],val_data[0].shape[3],val_data[0].shape[4]),dtype=np.float32))
-                        input_data[:,channel_map[dataset],:,:,:] = val_data[0]
-                        input_data = input_data.to(device)
-                        if dataset == "BRATS" and train_config.BRATS_two_channel_seg:
-                            label = val_data[1][:,[0],:,:,:].to(device)                      
-                        else:                        
-                            label = val_data[1].to(device)                        
-                        roi_size = (cropped_input_size[0], cropped_input_size[1], cropped_input_size[2])
-                        sw_batch_size = 1
-                        #using sliding window for the whole 3D image
-                        val_outputs = sliding_window_inference(input_data, roi_size, sw_batch_size, model)
-                        val_outputs = [post_trans(i) for i in decollate_batch(val_outputs)]
-                        # compute metric for current iteration
-                        dice_metric(y_pred=val_outputs, y=label)
-                        sensitivity_metric(y_pred=val_outputs, y=label)
-                        precision_metric(y_pred=val_outputs, y=label)                        
-                        IOU_metric(y_pred=val_outputs, y=label)           
-                    metric[dataset]["dice"] = dice_metric.aggregate().item()
-                    metric[dataset]["sensitivity"] = sensitivity_metric.aggregate()[0].item()
-                    metric[dataset]["precision"] = precision_metric.aggregate()[0].item()                    
-                    metric[dataset]["IOU"] = IOU_metric.aggregate().item()            
-                    dice_metric.reset()
-                    sensitivity_metric.reset()
-                    precision_metric.reset()                    
-                    IOU_metric.reset()
-                    if metric[dataset]["dice"] > best_metric[dataset]:
-                        best_metric[dataset] = metric[dataset]["dice"]
-                        best_metric_epoch[dataset] = epoch + 1
-                        if epoch>1:
-                            model_save_name = model_save_path + "_random_drop_" + str(args.randomly_drop) + '_'+ date + "_BEST_"+dataset+".pth"
-                            torch.save(model.state_dict(), model_save_name)                   
-                            print("saved new best metric model")
-                    print(
-                        "current epoch: {} current mean dice {}: {:.4f} best mean dice {}: {:.4f} at epoch {}".format(
-                            epoch + 1,dataset,metric[dataset]["dice"],dataset, best_metric[dataset], best_metric_epoch[dataset]
-                        )
+                precision_metric.reset()                    
+                IOU_metric.reset()
+                if metric[dataset]["dice"] > best_metric[dataset]:
+                    best_metric[dataset] = metric[dataset]["dice"]
+                    best_metric_epoch[dataset] = epoch + 1
+                    if epoch>1:
+                        model_save_name = model_save_path + "_random_drop_" + str(args.randomly_drop) + '_'+ date + "_BEST_"+dataset+".pth"
+                        torch.save(model.state_dict(), model_save_name)                   
+                        print("saved new best metric model")
+                print(
+                    "current epoch: {} current mean dice {}: {:.4f} best mean dice {}: {:.4f} at epoch {}".format(
+                        epoch + 1,dataset,metric[dataset]["dice"],dataset, best_metric[dataset], best_metric_epoch[dataset]
                     )
-                    #wandb log  
-                    #here only use wandb log to show other metric
-                    wandb.log({"epoch_val":epoch+1,"mdice_"+dataset:metric[dataset]["dice"], "sensitivity_"+dataset:metric[dataset]["sensitivity"],"precision_"+dataset:metric[dataset]["precision"],"mIOU_"+dataset:metric[dataset]["IOU"]})
+                )
+                #wandb log  
+                #use wandb to show other metrics.
+                wandb.log({"epoch_val":epoch+1,"mdice_"+dataset:metric[dataset]["dice"], "sensitivity_"+dataset:metric[dataset]["sensitivity"],"precision_"+dataset:metric[dataset]["precision"],"mIOU_"+dataset:metric[dataset]["IOU"]})

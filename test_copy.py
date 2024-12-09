@@ -14,18 +14,10 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from tabulate import tabulate
 from plots_graphs import bar_plot_1
-
-# TODO: need to access file with voets with each modality saved for each patient and then calculate dice score for each patient and 
-# each modality combination
-# then save the results in a csv file and a text file with a table
-# then plot the results in a bar graph with the dice score on the y axis and the modality combination on the x axis
+from nets.unet import Unet
 
 
-
-
-
-
-def create_dataset_for_test(dataset):
+def create_dataset_for_test(dataset: str):
     val_imtrans = Compose([EnsureChannelFirst()])
     val_segtrans = Compose([EnsureChannelFirst()])
     Database_config = config.Database_config()
@@ -41,7 +33,7 @@ def create_dataset_for_test(dataset):
         seg_transform=val_segtrans,
         image_only=False,
     )
-    val_loader = DataLoader(val_ds, batch_size=1, num_workers=4, pin_memory=0)
+    val_loader = DataLoader(val_ds, batch_size=1, num_workers=2, pin_memory=0)
     return val_loader
 
 
@@ -86,7 +78,7 @@ def test(
             sw_batch_size = 1
 
             # test using sliding window
-            if model_net_type == "UNet":
+            if model_net_type == "UNET":
                 val_data[0] = utils.create_UNET_input(
                     val_data,
                     modalities,
@@ -96,6 +88,7 @@ def test(
                 )
 
             val_images, val_labels = val_data[0].to(device), val_data[1].to(device)
+
             val_outputs = sliding_window_inference(
                 val_images, roi_size, sw_batch_size, model
             )
@@ -128,9 +121,11 @@ def test(
               
             i += 1
 
+            print("Dice score: ",np.round(current_dice.item(),3))
+
         metric = dice_metric.aggregate().item()
         print("DICE Metric:")
-        print(metric)
+        print(np.round(metric,3))
         dice_metric.reset()
         #print(dice_metrics)  # dict of filename and dice score
         
@@ -159,8 +154,8 @@ if __name__ == "__main__":
     dice_combination = []
 
     for combinations in [0]:
-        for dataset in ["TBI"]:
-            for modality_comb in ["0_1_2_3"]:
+        for dataset in ["MSSEG"]:
+            for modality_comb in ["0_1_2_3_4"]:
 
                 args.test_all_combinations = combinations
                 args.datasets_to_test = dataset
@@ -179,12 +174,9 @@ if __name__ == "__main__":
 
                 ####
 
-                Test_config.model_file_path = (
-                    'models/TBI/_random_drop_0_2024-12-04_09-15_BEST_TBI.pth'
-                )
-                Test_config.model_channel_map = {"TBI":[0,1,2,3]}
-                                                  #"VOETS2":[2,5,1],"BRATS":[1,3,4,5], "ATLAS":[3], "MSSEG":[1,3,4,5,0], "ISLES":[1,3,5,0], "TBI":[1,3,5,2], "WMH":[1,3]}   #{dataset: [0,1,2,3]} 
-                Test_config.model_modalities_trained_on = 4
+                Test_config.model_file_path = 'models/new_test_MSSEG_random_drop_0_Epoch_599.pth' # 'models/Train_BRATS_TBI_ATLAS_MSSEG_WMH.pth'   #models/new_test_MSSEG_random_drop_0_Epoch_599.pth'
+                Test_config.model_channel_map = {"MSSEG":[0,2,3,4,1]} #{"VOETS2":[1,5],"BRATS":[1,3,4,5], "ATLAS":[3], "MSSEG":[1,3,4,5,0], "ISLES":[1,3,5,0], "TBI":[1,3,5,2], "WMH":[1,3]}   #{dataset: [0,1,2,3]} 
+                Test_config.model_modalities_trained_on = 5
 
                 #####
 
@@ -193,20 +185,17 @@ if __name__ == "__main__":
                     + str(Test_config.model_file_path)
                     + " **************"
                 )
+                
 
-                model = utils.create_net(
-                    Test_config.model_file_path,
-                    Test_config.model_net_type,
-                    Test_config.model_modalities_trained_on,
-                    device,
-                    cuda_id,
-                )
+                model = utils.create_net(Test_config.model_file_path,Test_config.model_net_type,Test_config.model_modalities_trained_on, device, cuda_id)
 
                 print(
                     "************** TESTING DATASET "
                     + args.datasets_to_test
                     + " ***************"
                 )
+
+
                 dataloader = create_dataset_for_test(args.datasets_to_test)
                 dice_list = []
                 if test_all_combinations:

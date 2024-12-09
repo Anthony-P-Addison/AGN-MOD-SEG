@@ -1,21 +1,21 @@
 
 class Training_config:
         
-        epoch=600
+        epoch=601
         workers = 2 #numworker
         train_batch_size = 2 
-        val_interval = 4 # the number of epochs between the validation  
+        val_interval = 1 # the number of epochs between the validation  
         lr = 1e-3
-        load_pre_trained_model = False # if true will load pre-train model
+        load_pre_trained_model = True # if true will load pre-train model
         BRATS_two_channel_seg = False # Using different segmentation ground truths for different sets of modalities on BRATS   if true, the input that dropped the FLAIR and T2 will use ground truth that not contain edema     default false 
         model_type = "UNET" # default model type unet
         cropped_input_size = [128,128,128]    
-
+        
+        #lr_config
         drop_learning_rate = True
         drop_learning_rate_epoch = 150 # epoch at which to decrease the learning rate
         drop_learning_rate_value = 1e-4
-        # model_save_path 
-        # save model  pat
+
         model_save_path = "models/"
         load_model_path="models/new_test_MSSEG_random_drop_0_checkpoint_Epoch_599.pt"  # path to model .pt file
         save_name = "MSSEG_NO_DROP_3" #the name of the model
@@ -31,7 +31,7 @@ class Database_config:
         channels['MSSEG'] = ["FLAIR","T1","T1c","T2","PD"] 
         channels['ISLES'] = ["FLAIR", "T1", "T2", "DWI"]
         channels['WMH'] = ["FLAIR", "T1"]
-        channels['VOETS2'] = ["T1","T2","FLAIR"]     # t1,t2, t2c
+        channels['VOETS2'] = ["FLAIR","T2"]     # t1,t2, t2c
         channels['TBI'] = ["FLAIR", "T1", "T2", "SWI"]
         train_size={}
         #size for each database
@@ -50,7 +50,7 @@ class Database_config:
         total_size['ISLES']= 28  
         total_size['WMH']= 60
         total_size['TBI']= 281
-        total_size['VOETS2']= 10
+        total_size['VOETS2']= 0
         img_path={}
         seg_path={}
         img_path["BRATS"] = "data/BRATS/Images"
@@ -79,7 +79,7 @@ class Database_config:
         val_size["BRATS"]=40
         val_size["ATLAS"]=195
         val_size["ISLES"]=28
-        val_size["MSSEG"]=16   
+        val_size["MSSEG"]=15  
         val_size["WMH"]=18
         val_size["TBI"]=125
         val_size["VOETS2"]=11
@@ -87,11 +87,11 @@ class Database_config:
 
 class Test_config:
         save_segs= False # True to save the segmentation outputs 
-        save_path = ""    
-        model_file_path = "models/MSSEG_random_drop_1_BEST_MSSEG.pth"  #the path of the train model
-        model_net_type = "UNet" #the type of the pre-train model
-        model_modalities_trained_on = 1 #the number of modalities include in training 
-        model_channel_map = {'ATLAS':[0]} #{"VOETS2":[1,5],"BRATS":[1,3,4,5], "ATLAS":[3], "MSSEG":[1,3,4,5,0], "ISLES":[1,3,5,0], "TBI":[1,3,5,2], "WMH":[1,3]} #The allocated channel index of the modalities(each channel) in the testing databases (start from 0) For example "ATLAS": [3] means the T1 modality in ATLAS will be allocated to the forth channel
+        save_path = "save_segs"    
+        model_file_path = "models/new_test_BRATS_ATLAS_WMH_MSSEG_TBI_random_drop_0_checkpoint_Epoch_599.pt" #"models/new_test_MSSEG_random_drop_0_checkpoint_Epoch_599.pt"  #the path of the train model
+        model_net_type = "UNET" #the type of the pre-train model
+        model_modalities_trained_on = 6 #the number of modalities include in training 
+        model_channel_map = {"ATLAS":[0]} # {'MSSEG':[0,2,3,4,1]} #{"BRATS":[1,3,4,5], "ATLAS":[3], "MSSEG":[0,2,4,3,1], "ISLES":[1,3,5,0], "TBI":[1,3,5,2], "WMH":[1,3]} #The allocated channel index of the modalities(each channel) in the testing databases (start from 0) For example "ATLAS": [3] means the T1 modality in ATLAS will be allocated to the forth channel "VOETS2":[1,5],
         # path of testing dataset ONLY.   {"TBI":[0,1,2,3]}
 class Finetune_config:
         # simialr to training    

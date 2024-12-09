@@ -25,7 +25,8 @@ def rand_set_channels_to_zero(dataset_modalities: list, batch_img_data: torch.Te
         modalities_remaining.append(list(set(np.arange(len(dataset_modalities))) - set(modalities_dropped)))        
     return modalities_remaining, batch_img_data
 
-def create_dataloader(val_size: int, images, segs, workers, train_batch_size: int, total_train_data_size: int, current_train_data_size: int, cropped_input_size:list, limited_data = False, limited_data_size = 10):
+def create_dataloader(val_size: int, images, segs, workers, train_batch_size: int, total_train_data_size: int, current_train_data_size: int, cropped_input_size:list,image_only:bool = False):
+    """Create monai wrapped dataloaders for training and validation data"""
     div = total_train_data_size//current_train_data_size
     rem = total_train_data_size%current_train_data_size
     train_images = images[:-val_size]
@@ -47,17 +48,16 @@ def create_dataloader(val_size: int, images, segs, workers, train_batch_size: in
     train_ds = ImageDataset(train_images, train_segs, transform=train_imtrans, seg_transform=train_imtrans)
     train_loader = DataLoader(train_ds, batch_size=train_batch_size, shuffle=True, num_workers=workers, pin_memory=0)
     # create a validation data loader
-    val_ds = ImageDataset(images[-val_size:], segs[-val_size:], transform=val_imtrans, seg_transform=val_segtrans)
+    val_ds = ImageDataset(images[-val_size:], segs[-val_size:], transform=val_imtrans, seg_transform=val_segtrans,image_only = image_only)
     val_loader = DataLoader(val_ds, batch_size=1, num_workers=workers, pin_memory=0)
     return train_loader, val_loader
 
 
 def create_net(model_file_path,model_net_type,model_modalities_trained_on, device,cuda_id):
-    if model_net_type == "UNet":    
-      model = Unet(in_channels=model_modalities_trained_on,
-                          out_channels=1).to(device)
-      model.load_state_dict(torch.load(model_file_path, map_location={"cuda:0":cuda_id,"cuda:1":cuda_id}))
-      model.eval()
+    if model_net_type == "UNET":    
+        model = Unet(in_channels=model_modalities_trained_on,out_channels=1).to(device)
+        model.load_state_dict(torch.load(model_file_path, map_location={"cuda:0":cuda_id,"cuda:1":cuda_id}))
+        model.eval()
     return model
 
 def create_modality_combinations(modalities: list):
@@ -67,12 +67,27 @@ def create_modality_combinations(modalities: list):
     return modality_combinations
 
 def create_UNET_input(val_data, modalities, dataset_name,model_modalities_trained_on,model_channel_map):
+    """Create input data for UNET model"""
     zeros_arr = np.zeros_like(val_data[0])
     zeros_arr[:,modalities,:,:,:] = np.array(val_data[0][:,modalities,:,:,:])
     val_data[0] = torch.from_numpy(zeros_arr)
     input_data = torch.from_numpy(np.zeros((1,model_modalities_trained_on,val_data[0].shape[2],val_data[0].shape[3],val_data[0].shape[4]),dtype=np.float32))
     input_data[:,model_channel_map[dataset_name],:,:] = val_data[0][:,range(0,val_data[0].shape[1]),:,:,:]
     return input_data
+
+
+
+def create_UNET_input1(val_data, modalities, dataset_name, model_modalities_trained_on, model_channel_map):
+    """Create input data for UNET model"""
+    # Initialize input_data tensor with zeros
+    input_data = torch.from_numpy(np.zeros((1, model_modalities_trained_on, val_data[0].shape[2], val_data[0].shape[3], val_data[0].shape[4]), dtype=np.float32))
+    
+    # Copy data into input_data based on model_channel_map
+    input_data[:, model_channel_map[dataset_name], :, :, :] = val_data[0][:, modalities, :, :, :]
+    
+    
+    return input_data
+
 
 def create_UNET_input_quicktest(val_data, modalities, channel_map, model_modalities_trained_on):
     zeros_arr = np.zeros_like(val_data[0])
