@@ -26,7 +26,7 @@ def create_dataset_for_test(dataset):
     val_loader = DataLoader(val_ds, batch_size=1, num_workers=4, pin_memory=0)
     return val_loader 
 
-def test(model, val_loader, dataset_name, modalities,model_net_type,model_modalities_trained_on,model_channel_map, device, save_outputs, save_path):
+def test(model, val_loader, dataset_name, modalities,model_net_type,num_modalities_trained_on,model_channel_map, device, save_outputs, save_path):
   cropped_input_size = [128,128,128]
 
   #can add other metrics (here only show dice)
@@ -48,7 +48,7 @@ def test(model, val_loader, dataset_name, modalities,model_net_type,model_modali
 
       #test using sliding window
       if model_net_type == "UNet":
-        val_data[0] = utils.create_UNET_input(val_data, modalities, dataset_name, model_modalities_trained_on,model_channel_map)      
+        val_data[0] = utils.create_UNET_input(val_data, modalities, dataset_name, num_modalities_trained_on,model_channel_map)      
     
       val_images, val_labels = val_data[0].to(device), val_data[1].to(device)
       val_outputs = sliding_window_inference(val_images, roi_size, sw_batch_size, model)
@@ -90,6 +90,11 @@ if __name__=="__main__":
   parser.add_argument("--test_all_combinations", help="0 or 1 1 if testing on all possible modality combinations", type=int, default='0')
   args = parser.parse_args()
 
+  args.dataset = "VOETS2"
+  args.modalities_to_test = "0_1_2"
+  args.test_all_combinations = 0
+  args.device_id = 0
+
  
         
   test_all_combinations=bool(args.test_all_combinations)
@@ -101,7 +106,7 @@ if __name__=="__main__":
 
   print("*************** TESTING NET " + str(Test_config.model_file_path) + " **************")        
 
-  model = utils.create_net(Test_config.model_file_path,Test_config.model_net_type,Test_config.model_modalities_trained_on, device, cuda_id)
+  model = utils.create_net(Test_config.model_file_path,Test_config.model_net_type,Test_config.num_modalities_trained_on, device, cuda_id)
 
   print("************** TESTING DATASET " + args.datasets_to_test + " ***************")
   dataloader = create_dataset_for_test(args.datasets_to_test)
@@ -117,7 +122,7 @@ if __name__=="__main__":
                   args.datasets_to_test,
                   combination,
                   Test_config.model_net_type,
-                  Test_config.model_modalities_trained_on,
+                  Test_config.num_modalities_trained_on,
                   Test_config.model_channel_map,
                   device,
                   save_outputs= Test_config.save_segs,

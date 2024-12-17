@@ -3,9 +3,8 @@ from glob import glob
 import os
 from monai.data import decollate_batch
 from monai.inferers import sliding_window_inference
-from monai.metrics import DiceMetric,ConfusionMatrixMetric,MeanIoU
+from monai.metrics import DiceMetric, ConfusionMatrixMetric, MeanIoU
 from monai.transforms import Activations, AsDiscrete, Compose
-from monai.utils import set_determinism
 from monai.losses.dice import DiceLoss
 from nets.unet import Unet
 import numpy as np
@@ -14,148 +13,225 @@ import wandb
 import config
 import argparse
 import datetime
-import functools 
+from pydantic import BaseModel
+import json 
 
 
 
 
-if __name__ == "__main__":
+def main():
+        
+    torch.multiprocessing.set_sharing_strategy("file_system")
 
 
-    torch.multiprocessing.set_sharing_strategy('file_system') 
+    wandb_active = True
 
-    #command line argument
+    # command line argument
     parser = argparse.ArgumentParser()
     parser.add_argument("--device_id", help="ID of the GPU", type=int, default=0)
-    parser.add_argument("--datasets", help="datasets for training, using '_' to separate", type=str)
-    parser.add_argument("--randomly_drop", help="0 or 1, 1 if random dropping modalities when training", type=int, default='1')
-    #parser.add_argument("--save_name", help="name of the model to save", type=str)
+    parser.add_argument(
+        "--datasets", help="datasets for training, using '_' to separate", type=str
+    )
+    parser.add_argument(
+        "--randomly_drop",
+        help="0 or 1, 1 if random dropping modalities when training",
+        type=int,
+        default="1",
+    )
+    parser.add_argument("--save_name", help="name of the model to save", type=str)
 
+    #########################
     args = parser.parse_args()
     args.device_id = 0
-    args.datasets = "MSSEG"
-    args.randomly_drop = 0
-
+    args.datasets = "TBI"    #"WMH_MSSEG_BRATS_ATLAS_TBI"
+    args.randomly_drop = 1
+    args.save_name = "standard"  #additional_invariant_slot , standard, single_slot
+    ######################################
     randomly_drop = bool(args.randomly_drop)
 
-   
-    #load config
+    # load config
     train_config = config.Training_config()
     database_config = config.Database_config()
+    test_config = config.Test_config()
+
+    # Save the configuration classes to a JSON file
+    # train_config_dict = train_config.__dict__
+    # database_config_dict = database_config.__dict__
+    # model_save_path = 'experiment/'
+    # config_save_path = os.path.join(model_save_path, "config.json")
+    # with open(config_save_path, 'w') as config_file:
+    #     json.dump({
+    #         # "train_config": train_config_dict,
+    #         "database_config": database_config_dict,
+    #         "test_config": test_config.model_dump()
+    #     }, config_file, indent=4)
+    # print(f"Configuration saved to {config_save_path}")
+
+
+
 
     cropped_input_size = train_config.cropped_input_size
     epochs = train_config.epoch
 
+    # channel assignment
+    rand_assign_channels = False
+    domain_invariant_slot = False
+
     # create save model path. If the path does not exist, create it
     now = datetime.datetime.now()
-    date= now.strftime("%Y-%m-%d_%H-%M")
-    model_save_path = os.path.join(train_config.model_save_path,args.datasets + '/')
-    if not os.path.exists(os.path.join(train_config.model_save_path,args.datasets + '/')):
-        os.makedirs(os.path.join(train_config.model_save_path,args.datasets + '/'))   
+    date = now.strftime("%Y-%m-%d_%H-%M")
+    model_save_path = os.path.join(train_config.model_save_path, args.datasets + "/")
+    if not os.path.exists(
+        os.path.join(train_config.model_save_path, args.datasets + "/")
+    ):
+        os.makedirs(os.path.join(train_config.model_save_path, args.datasets + "/"))
 
-    #Use wandb for recording
-    run = wandb.init(
-    # Set the project where this run will be logged
-    project=train_config.project_name,
-    name=(args.datasets + "_random_drop_" + str(args.randomly_drop) + "_"+ date)
-    )  
+    if wandb_active:
+        # Use wandb for recording
+        run = wandb.init(
+            # Set the project where this run will be logged
+            project=train_config.project_name,
+            name=(
+                args.save_name
+                + args.datasets
+                + "_random_drop_"
+                + str(args.randomly_drop)
+                + "_"
+                + date
+            )  
+        )
 
-    #print setting for training
-    print("lr: ",train_config.lr)
+    # print setting for training
+    print("lr: ", train_config.lr)
     print("Workers: ", train_config.workers)
-    print("Batch size: ",train_config.train_batch_size)
-    print("RANDOMLY DROP? ",randomly_drop)
+    print("Batch size: ", train_config.train_batch_size)
+    print("RANDOMLY DROP? ", randomly_drop)
 
-    #set index
+    # set index
     img_index = 0
-    label_index = 1    
+    label_index = 1
 
     # Set the data size and total modalities
-    channels= database_config.channels
-    train_size=database_config.train_size
-    total_size=database_config.total_size
-    datasetlist=args.datasets.split("_")
-    total_modalities=[]
-    total_modalities=set(total_modalities)
-    data_size=0
+    channels = database_config.channels
+    train_size = database_config.train_size
+    total_size = database_config.total_size
+    datasetlist = args.datasets.split("_")
+    total_modalities = []
+    total_modalities = set(total_modalities)
+    data_size = 0
     for dataset in datasetlist:
-        total_modalities=total_modalities.union(set(channels[dataset]))
-        data_size=max(data_size,train_size[dataset])
-    total_modalities = sorted(list(total_modalities))   
-    print("data_size",data_size)
-    print("Total modalities: ", total_modalities)
-    
-    # Loop for allocating channel
-    channel_map={}
-    for dataset in datasetlist:
-         channel_map[dataset]=utils.map_channels(channels[dataset], total_modalities)
-         print("channel map:", dataset,channel_map[dataset]) 
+        total_modalities = total_modalities.union(set(channels[dataset]))
+        data_size = max(data_size, train_size[dataset])
+    total_modalities = sorted(list(total_modalities))
+    print("data_size", data_size)
+    # print("Total modalities: ", total_modalities)
 
+    # Loop for allocating channel
+    channel_map = {}
 
     # path initialization
     train_loaders = []
     val_loaders = []
-    val_loader={}
-    data_loader_map = {}    
-    img_path=database_config.img_path
-    seg_path=database_config.seg_path
-    load_model_path = train_config.load_model_path         
+    val_loader = {}
+    data_loader_map = {}
+    img_path = database_config.img_path
+    seg_path = database_config.seg_path
+    load_model_path = train_config.load_model_path
 
     # get dataloader
     for dataset in datasetlist:
-        print("Training: ",dataset)
-        val_size = total_size[dataset]-train_size[dataset]
-        images= sorted(glob(os.path.join(img_path[dataset], "*.*")))
-        segs = sorted(glob(os.path.join(seg_path[dataset],"*.*"))) 
-        train_loader_one, val_loader[dataset] = utils.create_dataloader(val_size=val_size, images=images,segs=segs, workers=train_config.workers,train_batch_size=train_config.train_batch_size,total_train_data_size=data_size,current_train_data_size=train_size[dataset],cropped_input_size=cropped_input_size)
+        print("Training: ", dataset)
+        val_size = total_size[dataset] - train_size[dataset]
+        images = sorted(glob(os.path.join(img_path[dataset], "*.*")))
+        segs = sorted(glob(os.path.join(seg_path[dataset], "*.*")))
+        train_loader_one, val_loader[dataset] = utils.create_dataloader(
+            val_size=val_size,
+            images=images,
+            segs=segs,
+            workers=train_config.workers,
+            train_batch_size=train_config.train_batch_size,
+            total_train_data_size=data_size,
+            current_train_data_size=train_size[dataset],
+            cropped_input_size=cropped_input_size,
+        )
         data_loader_map[dataset] = len(train_loaders)
         train_loaders.append(train_loader_one)
         val_loaders.append(val_loader[dataset])
-     
+
     # initialize GPU
     print("Running on GPU:" + str(args.device_id))
     print("Running for epochs:" + str(epochs))
     cuda_id = "cuda:" + str(args.device_id)
     device = torch.device(cuda_id)
     torch.cuda.set_device(cuda_id)
-    
+
     # initialize metrics
-    dice_metric = DiceMetric(include_background=True, reduction="mean", get_not_nans=False)
-    sensitivity_metric = ConfusionMatrixMetric(include_background=True, metric_name='sensitivity', reduction="mean", get_not_nans=False)    
-    precision_metric = ConfusionMatrixMetric(include_background=True, metric_name='precision', reduction="mean", get_not_nans=False)   
+    dice_metric = DiceMetric(
+        include_background=True, reduction="mean", get_not_nans=False
+    )
+    sensitivity_metric = ConfusionMatrixMetric(
+        include_background=True,
+        metric_name="sensitivity",
+        reduction="mean",
+        get_not_nans=False,
+    )
+    precision_metric = ConfusionMatrixMetric(
+        include_background=True,
+        metric_name="precision",
+        reduction="mean",
+        get_not_nans=False,
+    )
     IOU_metric = MeanIoU(include_background=True, reduction="mean", get_not_nans=False)
     post_trans = Compose([Activations(sigmoid=True), AsDiscrete(threshold=0.5)])
 
     # initialize the model (only show multiunet here)
-    print("in_channels= ",len(total_modalities))
-    print("batch size = ",train_config.train_batch_size)
+    print("in_channels= ", len(total_modalities))
+    print("batch size = ", train_config.train_batch_size)
+
     if train_config.model_type == "UNET":
         print("TRAINING WITH UNET")
-        model = Unet(in_channels=len(total_modalities)).to(device)
+        if domain_invariant_slot == True:
+            in_channel = len(total_modalities) + 1
+
+        elif domain_invariant_slot == False:
+            in_channel = len(total_modalities)
+
+        
+        model = (Unet(in_channels=in_channel).to(device))
+        
         optimizer = torch.optim.Adam(model.parameters(), lr=train_config.lr)
-        epoched=0
+        epoched = 0
+
         # load pre-trained weights
         if train_config.load_pre_trained_model:
             print("LOADING MODEL: ", load_model_path)
-            checkpoint = torch.load(load_model_path, map_location={"cuda:0":cuda_id,"cuda:1":cuda_id})
-            model.load_state_dict(checkpoint['model_state_dict'])
-            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            epoched=checkpoint['epoch']+1   
+            checkpoint = torch.load(
+                load_model_path, map_location={"cuda:0": cuda_id, "cuda:1": cuda_id}
+            )
+            model.load_state_dict(checkpoint["model_state_dict"])
+            optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+            epoched = checkpoint["epoch"] + 1
 
     # defined loss function
-    loss_function = DiceLoss(sigmoid=True)    
+    loss_function = DiceLoss(sigmoid=True)
 
     # initialize the best metric
-    best_metric={}
-    best_metric_epoch={}
+    best_metric = {}
+    best_metric_epoch = {}
     for dataset in datasetlist:
         best_metric[dataset] = -1
-        best_metric_epoch[dataset] = -1    
+        best_metric_epoch[dataset] = -1
 
     metric_values = list()
 
-    # #training
-    for epoch in range(epoched,epochs):
+    # wandb watch model and look at model weights. 
+
+    # if wandb_active:
+    #     wandb.watch(model, log=None,log_freq=1000,log_graph=True)
+        
+    ##training
+
+    for epoch in range(epoched, epochs):
 
         print("-" * 10)
         print(f"epoch {epoch + 1}/{epochs}")
@@ -163,140 +239,441 @@ if __name__ == "__main__":
         epoch_loss = 0
         step = 0
 
-        # drop learning rate 
-        if train_config.drop_learning_rate and epoch >= train_config.drop_learning_rate_epoch:
+        # drop learning rate
+        if (
+            train_config.drop_learning_rate
+            and epoch >= train_config.drop_learning_rate_epoch
+        ):
             for g in optimizer.param_groups:
-                g['lr'] = train_config.drop_learning_rate_value
+                g["lr"] = train_config.drop_learning_rate_value
 
-        for batch_data in zip(*train_loaders): 
+        for batch_data in zip(*train_loaders):
+
+            for dataset in datasetlist:
+                channel_map[dataset] = utils.map_channels(
+                    channels[dataset],
+                    total_modalities,
+                    rand_assign=rand_assign_channels,
+                )
+
             step += 1
             outputs = []
             labels = []
+
             for dataset in datasetlist:
-                #Only for BRATS    BRATS may use different ground truth
+                # Only for BRATS    BRATS may use different ground truth
                 if dataset == "BRATS":
                     loader_index = data_loader_map["BRATS"]
-                    batch = batch_data[loader_index]                
+                    batch = batch_data[loader_index]
                     if randomly_drop:
-                        modalities_remaining, batch[img_index] = utils.rand_set_channels_to_zero(channels["BRATS"], batch[img_index])
-                        for i in range (batch[label_index].shape[0]):
-                        # For BRATS because edema can only be seen on some modalities can use different ground truth for different sets of modalities in input (this need the ground truth file that have multiple channels and for each channel it contain a different gound truth)
-                            if (0 not in modalities_remaining[i]) and (3 not in modalities_remaining[i]):
+                        modalities_remaining, batch[img_index] = (
+                            utils.rand_set_channels_to_zero(
+                                channels["BRATS"], batch[img_index]
+                            )
+                        )
+                        for i in range(batch[label_index].shape[0]):
+
+                            
+                            # For BRATS because edema can only be seen on some modalities can use different ground truth for different sets of modalities in input (this need the ground truth file that have multiple channels and for each channel it contain a different gound truth)
+                            if (0 not in modalities_remaining[i]) and (
+                                3 not in modalities_remaining[i]
+                            ):
                                 # Edema cannot be seen so change segmentation to labels without edema
                                 seg_channel = 1
                             else:
                                 seg_channel = 0
-                            if train_config.BRATS_two_channel_seg:                            
-                                label[i,:,:,:,:] = batch[label_index][i,[seg_channel],:,:,:].to(device)                                
+                            if train_config.BRATS_two_channel_seg:
+                                label[i, :, :, :, :] = batch[label_index][
+                                    i, [seg_channel], :, :, :
+                                ].to(device)
                             else:
-                                #default setting of our work: not using different labels
+                                # default setting of our work: not using different labels
                                 label = batch[label_index].to(device)
-                    else:                        
-                        label = batch[label_index].to(device)                         
-                    input_data = torch.from_numpy(np.zeros((batch[img_index].shape[0],len(total_modalities),cropped_input_size[0],cropped_input_size[1],cropped_input_size[2]),dtype=np.float32))
-                    input_data[:,channel_map["BRATS"],:,:,:] = batch[img_index]
-                    input_data = input_data.to(device)        
+                    else:
+                        label = batch[label_index].to(device)
+                    input_data = torch.from_numpy(
+                        np.zeros(
+                            (
+                                batch[img_index].shape[0],
+                                len(total_modalities),
+                                cropped_input_size[0],
+                                cropped_input_size[1],
+                                cropped_input_size[2],
+                            ),
+                            dtype=np.float32,
+                        )
+                    )
+                    input_data[:, channel_map["BRATS"], :, :, :] = batch[img_index]
+                    input_data = input_data.to(device)
                     out = model(input_data)
                     outputs.append(out)
                     labels.append(label)
-                else: #other databases are similar
+                
+
+
+
+                elif dataset == "TBI":
+                    loader_index = data_loader_map["TBI"]
+                    batch = batch_data[loader_index]
+                    TBI_multi_channel_seg = database_config.TBI_multichannel
+
+                    if randomly_drop:
+                        modalities_remaining, batch[img_index] = (
+                            utils.rand_set_channels_to_zero(
+                                channels["TBI"], batch[img_index]
+                            )
+                        )
+                        # this part is only relevant for TBI when doing multi channel segmentation with modality drop 
+                        # if (have FLAIR or T2, no SWI: label on Flair) (have SWI, no FLAIR and T2 : label on SWI) (Other: merged)
+                        if (
+                            (0 not in modalities_remaining)
+                            and (2 not in modalities_remaining)
+                            and (3 not in modalities_remaining)
+                        ):
+                            seg_channel = 2
+                        elif (
+                            (0 not in modalities_remaining)
+                            and (2 not in modalities_remaining)
+                            and (3 in modalities_remaining)
+                        ):
+                            seg_channel = 1
+                        elif 3 not in modalities_remaining:
+                            seg_channel = 0
+                        else:
+                            seg_channel = 2
+
+                        if TBI_multi_channel_seg:
+                            label = batch[label_index][:, [seg_channel], :, :, :].to(
+                                device
+                            )
+                        else:
+                            label = batch[label_index].to(device)
+                    else:
+                        label = batch[label_index][:, 0, :, :, :].to(            #TODO: need to check index
+                            device
+                        )  # for dropout
+                        label = label[:, None, :, :, :]
+
+                    input_data = torch.from_numpy(
+                        np.zeros(
+                            (
+                                batch[img_index].shape[0],
+                                len(total_modalities),
+                                cropped_input_size[0],
+                                cropped_input_size[1],
+                                cropped_input_size[2],
+                            ),
+                            dtype=np.float32,
+                        )
+                    )
+                    input_data[:, channel_map["TBI"], :, :, :] = batch[img_index]
+                    input_data = input_data.to(device)
+                    
+                    out = model(input_data)  # run model
+
+                    outputs.append(out)
+                    labels.append(label)
+
+
+
+
+                else:  # other databases are similar
                     loader_index = data_loader_map[dataset]
                     batch = batch_data[loader_index]
 
-               
                     if randomly_drop:
-                        _, batch[img_index] = utils.rand_set_channels_to_zero(channels[dataset], batch[img_index])          #ATLAS WILL ALWAYS BE ONE    
-                  
-              
-                    input_data = torch.from_numpy(np.zeros((batch[img_index].shape[0],len(total_modalities),cropped_input_size[0],cropped_input_size[1],cropped_input_size[2]),dtype=np.float32))
-                    input_data[:,channel_map[dataset],:,:,:] = batch[img_index]
-                    input_data = input_data.to(device)
+                        _, batch[img_index] = utils.rand_set_channels_to_zero(
+                            channels[dataset], batch[img_index]
+                        )  # ATLAS WILL ALWAYS BE ONE
+
+
+                    if domain_invariant_slot == True:
+
+                        # input_data = utils.domain_invar_slot(batch,img_index,dataset,channel_map,cropped_input_size,validation = False)
+
+                        # even if one modality is does not matter, can train invariant channel with this.
+
+                        num_modalities = len(total_modalities) + 1
+
+                        input_data = torch.from_numpy(
+                            np.zeros(
+                                (
+                                    batch[img_index].shape[0],
+                                    num_modalities,
+                                    cropped_input_size[0],
+                                    cropped_input_size[1],
+                                    cropped_input_size[2],
+                                ),
+                                dtype=np.float32,
+                            )
+                        )
+
+                        # select random modality channel
+                        random_channel = np.random.choice(channel_map[dataset])
+
+                        index = [random_channel for random_channel,x in enumerate(channel_map[dataset]) if x == random_channel]
+
+                        # coancatenate random modality channel.
+                        orig = batch[img_index]
+                        added = (batch[img_index][:, index])
+
+                        channel_map[dataset].append(num_modalities - 1)
+                        yo = torch.cat((orig, added), dim=1)
+                        input_data[:, channel_map[dataset], :, :, :] = yo
+                        channel_map[dataset] = channel_map[dataset][:-1]
+                        
+
                     
+
+                    else:
+
+                        input_data = torch.from_numpy(
+                            np.zeros(
+                                (
+                                    batch[img_index].shape[0],
+                                    len(total_modalities),
+                                    cropped_input_size[0],
+                                    cropped_input_size[1],
+                                    cropped_input_size[2],
+                                ),
+                                dtype=np.float32,
+                            )
+                        )
+                        input_data[:, channel_map[dataset], :, :, :] = batch[img_index]
+
+                    input_data = input_data.to(device)
+
                     label = batch[label_index].to(device)
                     out = model(input_data)
                     outputs.append(out)
                     labels.append(label)
+
             optimizer.zero_grad()
             combined_outs = torch.cat(outputs, dim=0)
-            combined_labels = torch.cat(labels,dim=0)
+            combined_labels = torch.cat(labels, dim=0)
             loss = loss_function(combined_outs, combined_labels)
             loss.backward()
             optimizer.step()
             epoch_loss += loss.item()
-            epoch_len = data_size  // train_config.train_batch_size
+            epoch_len = data_size // train_config.train_batch_size
             print(f"{step}/{epoch_len}, train_loss: {loss.item():.4f}")
-            wandb.log({"loss":loss.item(),"epoch":epoch+1})
+            if wandb_active:
+                wandb.log({"loss": loss.item(), "epoch": epoch + 1})
         epoch_loss /= step
         print(f"epoch {epoch + 1} average loss: {epoch_loss:.4f}")
         # save model
-        if (epoch+1) % 50 == 0:            
-            model_save_name = model_save_path + "_random_drop_" + str(args.randomly_drop)+ '_' + date + "_Epoch_" + str(epoch) + ".pth"
-            opt_save_name=model_save_path + "_random_drop_" + str(args.randomly_drop)+ '_' + date + "_checkpoint_Epoch_" + str(epoch) + ".pt"
-            torch.save(model.dice(), model_save_name)
-            torch.save({
-            'epoch': epoch,
-            'model_state_dict': model.state_dict(),
-            'optimizer_state_dict': optimizer.state_dict(),
-            'loss': epoch_loss ,
-            }, opt_save_name)
+        if (epoch + 1) % 50 == 0:
+            model_save_name = (
+                model_save_path
+                + args.save_name
+                + "_random_drop_"
+                + str(args.randomly_drop)
+                + "_"
+                + date
+                + "_Epoch_"
+                + str(epoch)
+                + ".pth"
+            )
+
+            opt_save_name = (
+                model_save_path
+                + args.save_name
+                + "_random_drop_"
+                + str(args.randomly_drop)
+                + "_"
+                + date
+                + "_checkpoint_Epoch_"
+                + str(epoch)
+                + ".pt"
+            )
+            torch.save(model.state_dict(), model_save_name)
+            torch.save(
+                {
+                    "epoch": epoch,
+                    "model_state_dict": model.state_dict(),
+                    "optimizer_state_dict": optimizer.state_dict(),
+                    "loss": epoch_loss,
+                },
+                opt_save_name,
+            )
             print("Saved Model")
-            
+
+            # if wandb_active:
+            #     wandb.log({"model_save_name":model_save_name})
+
         # validation
-    epoch = 1
-    if (epoch + 1) % train_config.val_interval == 0:
-        model.eval()
-        with torch.no_grad():
-            seg_channel = 0
-            val_images = None
-            val_labels = None
-            val_outputs = None
-            metric={}
-            dice_metric.reset()
-            sensitivity_metric.reset()
-            precision_metric.reset()                
-            IOU_metric.reset()                
-            for dataset in datasetlist:
-                metric[dataset]={}
-                loader_index = data_loader_map[dataset]
-                for val_data in val_loader[dataset]:
-                    #batch = val_data[loader_index]                       
-                    input_data = torch.from_numpy(np.zeros((1,len(total_modalities),val_data[0].shape[2],val_data[0].shape[3],val_data[0].shape[4]),dtype=np.float32))
-                    input_data[:,channel_map[dataset],:,:,:] = val_data[0]
-                    input_data = input_data.to(device)
-                    if dataset == "BRATS" and train_config.BRATS_two_channel_seg:
-                        label = val_data[1][:,[0],:,:,:].to(device)                      
-                    else:                        
-                        label = val_data[1].to(device)                        
-                    roi_size = (cropped_input_size[0], cropped_input_size[1], cropped_input_size[2])
-                    sw_batch_size = 1
-                    #using sliding window for the whole 3D image
-                    val_outputs = sliding_window_inference(input_data, roi_size, sw_batch_size, model)
-                    val_outputs = [post_trans(i) for i in decollate_batch(val_outputs)]
-                    # compute metric for current iteration
-                    dice_metric(y_pred=val_outputs, y=label)
-                    sensitivity_metric(y_pred=val_outputs, y=label)
-                    precision_metric(y_pred=val_outputs, y=label)                        
-                    IOU_metric(y_pred=val_outputs, y=label)           
-                metric[dataset]["dice"] = dice_metric.aggregate().item()
-                metric[dataset]["sensitivity"] = sensitivity_metric.aggregate()[0].item()
-                metric[dataset]["precision"] = precision_metric.aggregate()[0].item()                    
-                metric[dataset]["IOU"] = IOU_metric.aggregate().item()            
+
+        
+
+        if (epoch + 1) % train_config.val_interval == 0:
+            model.eval()
+            with torch.no_grad():
+                seg_channel = 0
+                val_images = None
+                val_labels = None
+                val_outputs = None
+                metric = {}
                 dice_metric.reset()
                 sensitivity_metric.reset()
-                precision_metric.reset()                    
+                precision_metric.reset()
                 IOU_metric.reset()
-                if metric[dataset]["dice"] > best_metric[dataset]:
-                    best_metric[dataset] = metric[dataset]["dice"]
-                    best_metric_epoch[dataset] = epoch + 1
-                    if epoch>1:
-                        model_save_name = model_save_path + "_random_drop_" + str(args.randomly_drop) + '_'+ date + "_BEST_"+dataset+".pth"
-                        torch.save(model.state_dict(), model_save_name)                   
-                        print("saved new best metric model")
-                print(
-                    "current epoch: {} current mean dice {}: {:.4f} best mean dice {}: {:.4f} at epoch {}".format(
-                        epoch + 1,dataset,metric[dataset]["dice"],dataset, best_metric[dataset], best_metric_epoch[dataset]
+                for dataset in datasetlist:
+                    metric[dataset] = {}
+                    loader_index = data_loader_map[dataset]
+                    for val_data in val_loader[dataset]:
+
+                        if domain_invariant_slot == True:
+                            num_modalities = len(total_modalities) + 1
+                            input_data = torch.from_numpy(
+                                np.zeros(
+                                    (
+                                        1,
+                                        num_modalities,
+                                        val_data[0].shape[2],
+                                        val_data[0].shape[3],
+                                        val_data[0].shape[4],
+                                    ),
+                                    dtype=np.float32,
+                                )
+                            )
+
+                            # # select random modality channel
+                            channel_map[dataset] = utils.map_channels(
+                            channels[dataset],
+                            total_modalities,
+                            rand_assign=rand_assign_channels,)
+                            # random_channel = np.random.choice(channel_map[dataset])
+                            # # coancatenate random modality channel.
+                            # orig = val_data[img_index]
+                            # # print(orig.size())
+                            # added = val_data[img_index][:, random_channel].unsqueeze(1)
+                            # # print(added.size())
+                            # yo = torch.cat((orig, added), dim=1)
+                            
+
+                            # #channel_map[dataset].append(num_modalities - 1)
+
+                            # channel_map1 = [0, 2, 3, 4, 1, 5]
+                            
+                            # input_data[:, channel_map1, :, :, :] = yo
+
+                            # input_data = input_data.to(device)
+                            # select random modality channel
+                            random_channel = np.random.choice(channel_map[dataset])
+
+                            index = [random_channel for random_channel,x in enumerate(channel_map[dataset]) if x == random_channel]
+
+                            # coancatenate random modality channel.
+                            orig = val_data[img_index]
+                            added = (val_data[img_index][:, index])
+
+                            channel_map[dataset].append(num_modalities - 1)
+                            yo = torch.cat((orig, added), dim=1)
+                            input_data[:, channel_map[dataset], :, :, :] = yo
+
+                            channel_map[dataset] = channel_map[dataset][:-1]
+
+
+                            
+
+                        elif domain_invariant_slot == False:
+                            input_data = torch.from_numpy(
+                                np.zeros(
+                                    (
+                                        1,
+                                        len(total_modalities),
+                                        val_data[0].shape[2],
+                                        val_data[0].shape[3],
+                                        val_data[0].shape[4],
+                                    ),
+                                    dtype=np.float32,
+                                )
+                            )
+                            input_data[:, channel_map[dataset], :, :, :] = val_data[0]
+
+                        input_data = input_data.to(device)
+
+                        if dataset == "BRATS" and train_config.BRATS_two_channel_seg:
+                            label = val_data[1][:, [0], :, :, :].to(device)
+                        elif dataset == "TBI" and TBI_multi_channel_seg:
+                            label = val_data[1][:,[2],:,:,:].to(device)
+                        
+                        else:
+                            label = val_data[1].to(device)
+                        roi_size = (
+                            cropped_input_size[0],
+                            cropped_input_size[1],
+                            cropped_input_size[2],
+                        )
+                        sw_batch_size = 1
+                        # using sliding window for the whole 3D image
+                        val_outputs = sliding_window_inference(
+                            input_data, roi_size, sw_batch_size, model
+                        )
+                        val_outputs = [
+                            post_trans(i) for i in decollate_batch(val_outputs)
+                        ]
+                        # compute metric for current iteration
+                        dice_metric(y_pred=val_outputs, y=label)
+                        sensitivity_metric(y_pred=val_outputs, y=label)
+                        precision_metric(y_pred=val_outputs, y=label)
+                        IOU_metric(y_pred=val_outputs, y=label)
+                    metric[dataset]["dice"] = dice_metric.aggregate().item()
+                    metric[dataset]["sensitivity"] = sensitivity_metric.aggregate()[0].item()
+                    metric[dataset]["precision"] = precision_metric.aggregate()[0].item()
+                    metric[dataset]["IOU"] = IOU_metric.aggregate().item()
+                    dice_metric.reset()
+                    sensitivity_metric.reset()
+                    precision_metric.reset()
+                    IOU_metric.reset()
+                    if metric[dataset]["dice"] > best_metric[dataset]:
+                        best_metric[dataset] = metric[dataset]["dice"]
+                        best_metric_epoch[dataset] = epoch + 1
+                        if epoch > 1:
+                            model_save_best_name = (
+                                model_save_path
+                                + args.save_name
+                                + "_random_drop_"
+                                + str(args.randomly_drop)
+                                + "_"
+                                + date
+                                + "_BEST_"
+                                + dataset
+                                + ".pth"
+                            )
+                            torch.save(model.state_dict(), model_save_best_name)
+                            print("saved new best metric model")
+                    print(
+                        "current epoch: {} current mean dice {}: {:.4f} best mean dice {}: {:.4f} at epoch {}".format(
+                            epoch + 1,
+                            dataset,
+                            metric[dataset]["dice"],
+                            dataset,
+                            best_metric[dataset],
+                            best_metric_epoch[dataset],
+                        )
                     )
-                )
-                #wandb log  
-                #use wandb to show other metrics.
-                wandb.log({"epoch_val":epoch+1,"mdice_"+dataset:metric[dataset]["dice"], "sensitivity_"+dataset:metric[dataset]["sensitivity"],"precision_"+dataset:metric[dataset]["precision"],"mIOU_"+dataset:metric[dataset]["IOU"]})
+                    
+                    
+                    if wandb_active:
+
+                        # wandb log
+                        wandb.log(
+                            {
+                                "epoch_val": epoch + 1,
+                                "mdice_" + dataset: metric[dataset]["dice"],
+                                "sensitivity_" + dataset: metric[dataset]["sensitivity"],
+                                "precision_" + dataset: metric[dataset]["precision"],
+                                "mIOU_" + dataset: metric[dataset]["IOU"],
+                            }
+                        )
+
+        # # save best checkpoint to 
+        # if wandb_active:
+        #     wandb.log({"Best_Checkpint_Path":model_save_best_name})
+
+            
+                
+
+if __name__ == "__main__":
+    main()

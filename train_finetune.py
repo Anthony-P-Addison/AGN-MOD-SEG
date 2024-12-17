@@ -6,16 +6,17 @@ from monai.data import decollate_batch
 from monai.inferers import sliding_window_inference
 from monai.metrics import DiceMetric,ConfusionMatrixMetric,MeanIoU
 from monai.transforms import Activations, AsDiscrete, Compose
-from monai.utils import set_determinism
 from monai.losses.dice import DiceLoss
-from nets.unet import res_unet
+from nets.unet import Unet
 import numpy as np
 import utils
-#import wandb
+import wandb
 import config
-#from config import Training_config,Database_config
+import datetime
 
 if __name__ == "__main__":
+
+    wandb_report = True
 
     torch.multiprocessing.set_sharing_strategy('file_system') 
 
@@ -23,33 +24,47 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--device_id", help="ID of the GPU", type=int, default=0)
     parser.add_argument("--datasets", help="datasets for training, using '_' to separate", type=str)
-    parser.add_argument("--save_name", help="File name for saving model weights and checkpoints", type=str, default='save')
+    #parser.add_argument("--save_name", help="File name for saving model weights and checkpoints", type=str, default='save')
     parser.add_argument("--randomly_drop", help="0 or 1, 1 if random dropping modalities when training", type=int, default='1')
     parser.add_argument("--load_model_finetune_path", help="The path of the pretrained model", type=str)
     parser.add_argument("--manual_channel_map", help="The allocated channel index of the modalities(each channel) in the finetuning input (start from 0)     Using '_' to separate.  For example, 1_3 means the first modality in the finetuning input goes to the second channel of the model, and the second modality goes to the fourth channel of the model.", type=str)
     parser.add_argument("--modalities_when_trained", help="modalities used for training the pre-train model using '_' to separate", type=str)
     args = parser.parse_args()
 
+    args.device_id = 1
+    args.datasets = "VOETS2"
+    finetune_dataset = args.datasets
+    args.randomly_drop = 0 
+    args.load_model_finetune_path = "models/standard/new_test_BRATS_ATLAS_WMH_MSSEG_TBI_random_drop_0_Epoch_599.pth"
+    args.manual_channel_map = "1_5_4"
+    args.modalities_when_trained = "0_1_2_3_4_5"
+
+    now = datetime.datetime.now()
+    date = now.strftime("%Y-%m-%d_%H-%M")
+
+
+
     #load config
-    Training_config=config.Finetune_config()
+    train_config=config.Finetune_config()
     randomly_drop = bool(args.randomly_drop)
     Database_config=config.Database_config()
-    cropped_input_size = Training_config.cropped_input_size
+    cropped_input_size = train_config.cropped_input_size
     modalities_when_trained=args.modalities_when_trained.split("_")
     manual_channel_map=[int(x) for x in args.manual_channel_map.split("_")]
-    epochs=Training_config.epoch
+    epochs=train_config.epoch
 
-    # Use wandb for recording
-    # run = wandb.init(
-    # # Set the project where this run will be logged
-    # project="all_in_one",
-    # name=save_name,
-    # )   
+    if wandb_report:
+        # Use wandb for recording
+        run = wandb.init(
+        #Set the project where this run will be logged
+        project=train_config.project_name,
+        name= finetune_dataset + "_"+ 'PAT_10_11_18_' + 'modalities:' + args.manual_channel_map + "_"+ "rand_drop_" + str(args.randomly_drop) + "_trained on: BRATS_ATLAS_WMH_MSSEG_TBI_" + date
+                )   
 
     #print setting for training
-    print("lr: ",Training_config.lr)
-    print("Workers: ", Training_config.workers)
-    print("Batch size: ",Training_config.train_batch_size)
+    print("lr: ",train_config.lr)
+    print("Workers: ", train_config.workers)
+    print("Batch size: ",train_config.train_batch_size)
     print("RANDOMLY DROP? ",randomly_drop)
 
     #set index
@@ -62,6 +77,9 @@ if __name__ == "__main__":
     total_size=Database_config.total_size
     datasetlist=args.datasets.split("_")
     data_size=0
+
+
+
     for dataset in datasetlist:        
         data_size=max(data_size,train_size[dataset])
     total_modalities = modalities_when_trained  # use the original total modalities
@@ -81,7 +99,7 @@ if __name__ == "__main__":
     data_loader_map = {}    
     img_path=Database_config.img_path
     seg_path=Database_config.seg_path
-    model_save_path = Training_config.model_save_path    
+    model_save_path = train_config.model_save_path    
     val_loader={}
 
     # get dataloader
@@ -90,10 +108,13 @@ if __name__ == "__main__":
         val_size = total_size[dataset]-train_size[dataset]
         images= sorted(glob(os.path.join(img_path[dataset], "*.*")))
         segs = sorted(glob(os.path.join(seg_path[dataset],"*.*"))) 
-        train_loader_one, val_loader[dataset] = utils.create_dataloader(val_size=val_size, images=images,segs=segs, workers=Training_config.workers,train_batch_size=Training_config.train_batch_size,total_train_data_size=data_size,current_train_data_size=train_size[dataset],cropped_input_size=cropped_input_size)
+
+        train_loader_one, val_loader[dataset] = utils.create_dataloader(val_size=val_size, images=images,segs=segs, workers=train_config.workers,train_batch_size=train_config.train_batch_size,total_train_data_size=data_size,current_train_data_size=train_size[dataset],cropped_input_size=cropped_input_size)
         data_loader_map[dataset] = len(train_loaders)
         train_loaders.append(train_loader_one)
         val_loaders.append(val_loader[dataset]) 
+
+
      
     # initialize GPU        
     print("Running on GPU:" + str(args.device_id))
@@ -109,13 +130,13 @@ if __name__ == "__main__":
     IOU_metric=MeanIoU(include_background=True, reduction="mean", get_not_nans=False)
     post_trans = Compose([Activations(sigmoid=True), AsDiscrete(threshold=0.5)])
     print("in_channels=",len(total_modalities))
-    print("batch size = ",Training_config.train_batch_size)
+    print("batch size = ",train_config.train_batch_size)
 
     # initialize the model with pre-trained weights
-    if Training_config.model_type == "UNET":
+    if train_config.model_type == "UNET":
         print("TRAINING WITH UNET")
-        model = res_unet(in_channels=len(total_modalities)).to(device)
-        optimizer = torch.optim.Adam(model.parameters(), lr=Training_config.lr)
+        model = Unet(in_channels=len(total_modalities)).to(device)
+        optimizer = torch.optim.Adam(model.parameters(), lr=train_config.lr)
         epoched=0
         # load pre-trained weights
         print("LOADING MODEL: ", args.load_model_finetune_path)
@@ -141,9 +162,9 @@ if __name__ == "__main__":
         step = 0
 
         # drop learning rate 
-        if Training_config.drop_learning_rate and epoch >= Training_config.drop_learning_rate_epoch:
+        if train_config.drop_learning_rate and epoch >= train_config.drop_learning_rate_epoch:
             for g in optimizer.param_groups:
-                g['lr'] = Training_config.drop_learning_rate_value
+                g['lr'] = train_config.drop_learning_rate_value
         
         for batch_data in zip(*train_loaders): 
             step += 1
@@ -164,7 +185,7 @@ if __name__ == "__main__":
                                 seg_channel = 1
                             else:
                                 seg_channel = 0
-                            if Training_config.BRATS_two_channel_seg:                            
+                            if train_config.BRATS_two_channel_seg:                            
                                 label[i,:,:,:,:] = batch[label_index][i,[seg_channel],:,:,:].to(device)                                
                             else:
                                 #default setting of our work: not using different labels
@@ -196,16 +217,17 @@ if __name__ == "__main__":
             loss.backward()
             optimizer.step()
             epoch_loss += loss.item()
-            epoch_len = data_size  // Training_config.train_batch_size
+            epoch_len = data_size  // train_config.train_batch_size
             print(f"{step}/{epoch_len}, train_loss: {loss.item():.4f}")
-            #wandb.log({"loss":loss.item(),"epoch":epoch+1})
+            if wandb_report:
+                wandb.log({"loss":loss.item(),"epoch":epoch+1})
         epoch_loss /= step
         print(f"epoch {epoch + 1} average loss: {epoch_loss:.4f}")
 
         # save model
         if (epoch+1) % 50 == 0:            
-            model_save_name = model_save_path + args.save_name + "_Epoch_" + str(epoch) + ".pth"
-            opt_save_name=model_save_path + args.save_name + "_checkpoint_Epoch_" + str(epoch) + ".pt"
+            model_save_name = model_save_path  + 'Finetune_' + finetune_dataset  + "_Epoch_" + str(epoch) + f"_{date}" + ".pth"
+            opt_save_name=model_save_path + 'Finetune' + finetune_dataset + "_checkpoint_Epoch_" + str(epoch) + f"{date}" + ".pt"
             torch.save(model.state_dict(), model_save_name)
             torch.save({
             'epoch': epoch,
@@ -216,7 +238,7 @@ if __name__ == "__main__":
             print("Saved Model")      
 
         # validation
-        if (epoch + 1) % Training_config.val_interval == 0:
+        if (epoch + 1) % train_config.val_interval == 0:
             model.eval()
             with torch.no_grad():
                 seg_channel = 0
@@ -236,7 +258,7 @@ if __name__ == "__main__":
                         input_data = torch.from_numpy(np.zeros((1,len(total_modalities),val_data[0].shape[2],val_data[0].shape[3],val_data[0].shape[4]),dtype=np.float32))
                         input_data[:,channel_map[dataset],:,:,:] = val_data[0]
                         input_data = input_data.to(device)
-                        if dataset == "BRATS" and Training_config.BRATS_two_channel_seg:
+                        if dataset == "BRATS" and train_config.BRATS_two_channel_seg:
                             label = val_data[1][:,[0],:,:,:].to(device)                      
                         else:                        
                             label = val_data[1].to(device)                        
@@ -262,7 +284,7 @@ if __name__ == "__main__":
                         best_metric[dataset] = metric[dataset]["dice"]
                         best_metric_epoch[dataset] = epoch + 1
                         if epoch>1:
-                            model_save_name = model_save_path + args.save_name + "_BEST_"+dataset+".pth"
+                            model_save_name = model_save_path  + 'BEST_pth_' + 'Finetune_' + finetune_dataset + ".pth"
                             torch.save(model.state_dict(), model_save_name)                                                  
                             print("saved new best metric model")
                     print(
@@ -270,7 +292,11 @@ if __name__ == "__main__":
                             epoch + 1,dataset,metric[dataset]["dice"],dataset, best_metric[dataset], best_metric_epoch[dataset]
                         )
                     )
-                    #wandb log  
-                    #here only use wandb log to show other metric
-                    #wandb.log({"epoch_val":epoch+1,"mdice_"+dataset:metric[dataset]["dice"], "sensitivity_"+dataset:metric[dataset]["sensitivity"],"precision_"+dataset:metric[dataset]["precision"],"mIOU_"+dataset:metric[dataset]["IOU"]})
-                   
+                    if wandb_report:
+                        #wandb log  
+                        #here only use wandb log to show other metric
+                        wandb.log({"epoch_val":epoch+1,"mdice_"+dataset:metric[dataset]["dice"], "sensitivity_"+dataset:metric[dataset]["sensitivity"],"precision_"+dataset:metric[dataset]["precision"],"mIOU_"+dataset:metric[dataset]["IOU"]})
+                    
+
+
+                    

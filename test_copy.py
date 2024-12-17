@@ -77,6 +77,14 @@ def test(
             )
             sw_batch_size = 1
 
+            # Loop for allocating channel
+            channel_map = {}
+            
+            dataset = args.datasets_to_test
+
+            
+        
+
             # test using sliding window
             if model_net_type == "UNET":
                 val_data[0] = utils.create_UNET_input(
@@ -84,7 +92,7 @@ def test(
                     modalities,
                     dataset_name,
                     model_modalities_trained_on,
-                    model_channel_map,
+                    model_channel_map,                                 # model_channel_map
                 )
 
             val_images, val_labels = val_data[0].to(device), val_data[1].to(device)
@@ -154,8 +162,8 @@ if __name__ == "__main__":
     dice_combination = []
 
     for combinations in [0]:
-        for dataset in ["MSSEG"]:
-            for modality_comb in ["0_1_2_3_4"]:
+        for dataset in ["VOETS2"]:
+            for modality_comb in ["0_1"]:
 
                 args.test_all_combinations = combinations
                 args.datasets_to_test = dataset
@@ -174,9 +182,9 @@ if __name__ == "__main__":
 
                 ####
 
-                Test_config.model_file_path = 'models/new_test_MSSEG_random_drop_0_Epoch_599.pth' # 'models/Train_BRATS_TBI_ATLAS_MSSEG_WMH.pth'   #models/new_test_MSSEG_random_drop_0_Epoch_599.pth'
-                Test_config.model_channel_map = {"MSSEG":[0,2,3,4,1]} #{"VOETS2":[1,5],"BRATS":[1,3,4,5], "ATLAS":[3], "MSSEG":[1,3,4,5,0], "ISLES":[1,3,5,0], "TBI":[1,3,5,2], "WMH":[1,3]}   #{dataset: [0,1,2,3]} 
-                Test_config.model_modalities_trained_on = 5
+                Test_config.model_file_path = 'models/new_test_BRATS_ATLAS_WMH_MSSEG_TBI_random_drop_0_Epoch_599.pth' # 'models/Train_BRATS_TBI_ATLAS_MSSEG_WMH.pth'   #models/new_test_MSSEG_random_drop_0_Epoch_599.pth'
+                Test_config.model_channel_map = {"VOETS2":[1,5],"BRATS":[1,3,4,5], "ATLAS":[3], "MSSEG":[1,3,4,5,0], "ISLES":[1,3,5,0], "TBI":[1,3,5,2], "WMH":[1,3]}   #{dataset: [0,1,2,3]} 
+                Test_config.model_modalities_trained_on = 6
 
                 #####
 
