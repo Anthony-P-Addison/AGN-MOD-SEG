@@ -1,5 +1,5 @@
 from old.test import create_dataset_for_test, test
-from Modality_Combinations import combination_gen,mod_combinations
+from old.Modality_Combinations import combination_gen,mod_combinations
 import argparse
 import torch
 import utils
@@ -7,14 +7,11 @@ import config
 import os
 
 
-
 ### create combninations of modalities and test them with pretrained model and return dice scores for each ##
 
 path = 'data_N2_after_norm'
 labels= os.path.join(path, 'labels')
 images = os.path.join(path, 'images')
-
-
 
 
 

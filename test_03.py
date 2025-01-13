@@ -46,34 +46,8 @@ def create_val_dataloader(
     return val_loader
 
 
-if __name__ == "__main__": 
+def main(args,invar_not_required:bool):
  
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--device_id", help="ID of the GPU", type=int, default=0)
-    parser.add_argument("--datasets_to_test", help="dataset for testing", type=str)
-    parser.add_argument(
-        "--modalities_to_test",
-        help="The modalities for testing (the index of the modalities for that input),using '_' to separate if 0_1_2 for BRATS it would mean test on FLAIR, T1, T1c",
-        type=str,
-    )
-    parser.add_argument(
-        "--test_all_combinations",
-        help="0 or 1 1 if testing on all possible modality_comb combinations",
-        type=int,
-        default="0",
-    )
-    parser.add_argument(
-        "--trained_on", help="The datasets the model was trained on", type=str
-    )
-
-    args = parser.parse_args()
-
-    args.datasets_to_test = "ISLES"      # DWI is not being assigned to a slot
-    args.modalities_to_test = "0_1_2_3"       # numeric order of modalities
-    args.test_all_combinations = 1
-    args.device_id = 0
-    args.trained_on =  "BRATS_MSSEG_ATLAS_TBI_WMH"  # datasets the model was trained on
-
     
     datasets_to_test = args.datasets_to_test
 
@@ -86,10 +60,12 @@ if __name__ == "__main__":
 
     # random assign channels
     rand_assign = test_config.rand_assign
-    print(f"Random assign: {rand_assign}\n")
+    modality_remove = test_config.modality_remove
+    domain_invariant_slot = test_config.domain_invariant_slot
+    single_slot = test_config.single_slot
+    print(f"Random assign: {rand_assign}\n Domain invariant slot: {domain_invariant_slot}\n modality removed during training: {modality_remove}")        
 
     cropped_input_size = [128, 128, 128]
-
 
     # set index
     img_index = 0
@@ -107,6 +83,15 @@ if __name__ == "__main__":
     total_modalities = set(total_modalities)
     data_size = 0
     for data in datasetlist:
+
+        if domain_invariant_slot == True:
+            if modality_remove==None:
+                channels[data].append("invar")
+            elif modality_remove !=None:
+                channels[data] = channels[data] = ["invar" if modality == modality_remove else modality for modality in channels[data]]
+        
+        
+
         total_modalities = total_modalities.union(set(channels[data]))
         data_size = max(data_size, train_size[data])
     total_modalities = sorted(
@@ -119,6 +104,11 @@ if __name__ == "__main__":
     channel_map = {}
     
     dataset = args.datasets_to_test
+
+    
+    
+    if invar_not_required:
+        channels[dataset].remove("invar")
     
   
     channel_map[dataset] = utils.map_channels(channels[dataset], total_modalities,rand_assign=rand_assign)   #  TODO: note this argument somewhere else. 
@@ -127,7 +117,7 @@ if __name__ == "__main__":
     # path initialization
     val_loaders = []
     val_loader = {}
-    data_loader_map = test_config.model_channel_map
+    #data_loader_map = test_config.model_channel_map
     img_path = database_config.img_path
     seg_path = database_config.seg_path
     load_model_path = test_config.model_file_path
@@ -178,7 +168,11 @@ if __name__ == "__main__":
 
     if test_config.model_net_type == "UNET":
 
-        model = Unet(in_channels=len(total_modalities),out_channels = 1).to(device)
+        if single_slot:
+            model = Unet(in_channels=1, out_channels=1).to(device)
+
+        else:
+            model = Unet(in_channels=len(total_modalities),out_channels = 1).to(device)
 
         print("LOADING CHECKPOINT: ", load_model_path)
         checkpoint = torch.load(
@@ -231,17 +225,29 @@ if __name__ == "__main__":
             dataset = args.datasets_to_test
 
             metric[dataset] = {}
-            loader_index = data_loader_map[dataset]
+            # = data_loader_map[dataset]
             for val_data in val_loader[dataset]:
 
+
+                
+
                 if test_config.model_net_type == "UNET":
-                    val_data[0] = utils.create_UNET_input(
-                        val_data,
-                        combination,
-                        args.datasets_to_test,
-                        test_config.num_modalities_trained_on,
-                        channel_map,
-                    )
+                    if single_slot:
+                        val_data[0] = utils.create_single_channel_UNET_input(
+                            val_data,
+                            combination,
+                            args.datasets_to_test,
+                            test_config.num_modalities_trained_on,
+                            channel_map,
+                        )
+                    else:
+                        val_data[0] = utils.create_UNET_input(
+                            val_data,
+                            combination,
+                            args.datasets_to_test,
+                            test_config.num_modalities_trained_on,
+                            channel_map,
+                        )
 
                 input_data = val_data[0]
                 # batch = val_data[loader_index]
@@ -253,9 +259,9 @@ if __name__ == "__main__":
              
                 elif dataset == "TBI" and database_config.TBI_multichannel:
                     label = val_data[1][:,[2],:,:,:].to(device)  
-                else:
-                         
+                else:  
                     label = val_data[1].to(device)
+
                 roi_size = (
                 cropped_input_size[0],
                 cropped_input_size[1],
@@ -318,5 +324,40 @@ if __name__ == "__main__":
     
 
 
+if __name__ == "__main__":
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--device_id", help="ID of the GPU", type=int, default=0)
+    parser.add_argument("--datasets_to_test", help="dataset for testing", type=str)
+    parser.add_argument(
+        "--modalities_to_test",
+        help="The modalities for testing (the index of the modalities for that input),using '_' to separate if 0_1_2 for BRATS it would mean test on FLAIR, T1, T1c",
+        type=str,
+    )
+    parser.add_argument(
+        "--test_all_combinations",
+        help="0 or 1 1 if testing on all possible modality_comb combinations",
+        type=int,
+        default="0",
+    )
+    parser.add_argument(
+        "--trained_on", help="The datasets the model was trained on", type=str
+    )
+
+    args = parser.parse_args()
+
+    ####################
+
+    args.datasets_to_test = 'ISLES' # dataset for testing
+    args.modalities_to_test = "3"       # numeric order of modalities
+    args.test_all_combinations = 0
+    args.device_id = 1
+    args.trained_on = 'MSSEG'   # datasets the model was trained on
+    #########################
+
+    # when testing without putting a modality into invariant slot testing with the other slots
+    invar_not_required = False
 
 
+
+    main(args,invar_not_required=invar_not_required)
