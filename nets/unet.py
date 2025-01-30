@@ -2,6 +2,9 @@ import torch
 import torch.nn as nn
 from nets.residual_block import ResidualUnit_changed as ResidualUnit
 from monai.networks.blocks import Convolution
+
+
+
 class  Unet(nn.Module):
 
     def __init__(self,
@@ -59,5 +62,37 @@ class  Unet(nn.Module):
         up_out_4 = self.up_stage_4(up_in_4)
 
         return up_out_4
+
+
+    def add_input_channel(self):
+        """
+        Add an additional input channel with randomly initialized weights.
+        """
+        # Get the current weights of the first convolutional layer
+        old_weights = self.conv_1.conv[0].conv.weight.data
+
+        # Create new weights with an additional input channel
+        new_weights = torch.randn((old_weights.shape[0], old_weights.shape[1] + 1, old_weights.shape[2], old_weights.shape[3], old_weights.shape[4]))
+
+        # Copy the old weights to the new weights
+        new_weights[:, :-1, :, :, :] = old_weights
+
+        # Randomly initialize the new channel weight 
+        # dont think I want the below line as all run in torch.no_grad(). 
+        nn.init.kaiming_normal_(new_weights[:, -1, :, :, :], mode='fan_in', nonlinearity='relu')
+
+        # Assign the new weights to the first convolutional layer
+        self.conv_1.conv[0].weight = nn.Parameter(new_weights)
+
+        # If the first convolutional layer has a bias term, adjust it accordingly
+        if self.conv_1.conv[0].bias is not None:
+            old_bias = self.conv_1.conv[0].bias.data
+            new_bias = torch.cat((old_bias, torch.randn(1)))
+            self.conv_1.conv[0].bias = nn.Parameter(new_bias)
+
+
+
+
+
 
 

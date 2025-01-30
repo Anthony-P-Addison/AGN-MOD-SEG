@@ -1,51 +1,14 @@
-import torch
-from glob import glob
-import os
-from monai.data import decollate_batch
-from monai.inferers import sliding_window_inference
-from monai.metrics import DiceMetric, ConfusionMatrixMetric, MeanIoU
-from monai.transforms import Activations, AsDiscrete, Compose
-from nets.unet import Unet
-import numpy as np
-import utils
-import config
-import argparse
-from monai.data import ImageDataset, DataLoader
-from monai.transforms import EnsureChannelFirst
-import tabulate
+class test ():
 
-
-
-
-def create_val_dataloader(
-    val_size: int,
-    images,
-    segs,
-    workers,
-    image_only: bool = False,
-):
-    """Create monai wrapped dataloaders for training and validation data"""
-
-    # image augmentation through spatial cropping to size and by randomly rotating
-
-    val_imtrans = Compose([EnsureChannelFirst()])
-    val_segtrans = Compose([EnsureChannelFirst()])
-    # create a training data loader
-
-    # create a validation data loader
-    val_ds = ImageDataset(
-        images[-val_size:],
-        segs[-val_size:],
-        transform=val_imtrans,
-        seg_transform=val_segtrans,
-        image_only=image_only,
-    )
+    train_config = config.Training_config()
+    database_config = config.Database_config()
+    test_config = config.Test_config()
     
-    val_loader = DataLoader(val_ds, batch_size=1, num_workers=workers, pin_memory=0)
-    return val_loader
+    def __init__(self,arg):
 
 
-def main(args):
+
+def main(args,invar_not_required:bool):
  
     
     datasets_to_test = args.datasets_to_test
@@ -106,8 +69,8 @@ def main(args):
 
     
     
-    # if invar_not_required:
-    #     channels[dataset].remove("invar")
+    if invar_not_required:
+        channels[dataset].remove("invar")
     
   
     channel_map[dataset] = utils.map_channels(channels[dataset], total_modalities,rand_assign=rand_assign)   #  TODO: note this argument somewhere else. 
@@ -281,7 +244,7 @@ def main(args):
                 IOU_metric(y_pred=val_outputs, y=label)
 
                 # can changebelow as needed to see the actula file name 
-                print("File:",images[-val_size:][steps],"Dice: ", np.round(current_dice, 4))
+                print("File:",images[-val_size:][steps],"Dice: ", np.round(current_dice, 3))
 
                 save_outputs = test_config.save_segs
 
@@ -312,10 +275,10 @@ def main(args):
             precision_metric.reset()
             IOU_metric.reset()
 
-            print(f'\n  mdice: {np.round(metric[dataset]["dice"],4)}\n ')
+            print(f'\n  mdice: {np.round(metric[dataset]["dice"],3)}\n ')
 
             # append tuple of combination and mean dice to list
-            mean_dice_comb.append([modality_list, (np.round(metric[dataset]["dice"],4))])
+            mean_dice_comb.append([modality_list, (np.round(metric[dataset]["dice"],3))])
               
 
     
@@ -348,15 +311,16 @@ if __name__ == "__main__":
 
     ####################
 
-    args.datasets_to_test = 'ISLES' # dataset for testing
+    args.datasets_to_test = 'BRATS' # dataset for testing
     args.modalities_to_test = "0_1_2_3"       # numeric order of modalities
-    args.test_all_combinations = 1
-    args.device_id = 0
-    args.trained_on = 'ISLES'   # datasets the model was trained on
+    args.test_all_combinations = 0
+    args.device_id = 1
+    args.trained_on = 'WMH_MSSEG_BRATS_ATLAS_TBI'   # datasets the model was trained on
     #########################
 
+    # when testing without putting a modality into invariant slot testing with the other slots
+    invar_not_required = False
 
-
-    # for modes in ['1']:
+    # for modes in ['0','1','2','3']:
     #     args.modalities_to_test = modes
-    main(args)
+    main(args,invar_not_required=invar_not_required)

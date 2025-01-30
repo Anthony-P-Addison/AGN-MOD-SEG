@@ -15,9 +15,15 @@ import argparse
 import datetime
 from dataloader import get_dataloader
 import copy
+from tqdm import tqdm
+import random
 
 
-def main(wandb_active, args):
+
+def main (args,k_fold=None):
+    
+    ###### move this #### 
+    mixup = False
 
     torch.multiprocessing.set_sharing_strategy("file_system")
 
@@ -32,6 +38,8 @@ def main(wandb_active, args):
     randomly_drop = bool(train_config.random_drop)
     single_slot = train_config.single_slot
     wandb_active = train_config.wandb_active
+   
+   
     
 
     if randomly_drop and single_slot:
@@ -60,11 +68,11 @@ def main(wandb_active, args):
     # create save model path. If the path does not exist, create it
     now = datetime.datetime.now()
     date = now.strftime("%Y-%m-%d_%H-%M")
-    model_save_path = os.path.join(train_config.model_save_path, args.datasets + "/")
+    model_save_path = os.path.join(train_config.model_save_path, args.datasets + "/" + date + "/")
     if not os.path.exists(
-        os.path.join(train_config.model_save_path, args.datasets + "/")
+       model_save_path
     ):
-        os.makedirs(os.path.join(train_config.model_save_path, args.datasets + "/"))
+        os.makedirs(model_save_path)
 
     if wandb_active:
         # Use wandb for recording
@@ -75,7 +83,7 @@ def main(wandb_active, args):
                 train_config.project_name 
                 + args.datasets
                 + "_random_drop_"
-                + str(args.randomly_drop)
+                + str(randomly_drop)
                 + "_"
                 + 'modality_remove:_'
                 + str(modality_remove)
@@ -88,7 +96,16 @@ def main(wandb_active, args):
     print("Workers: ", train_config.workers)
     print("Batch Size: ", train_config.train_batch_size)
     print("RANDOM DROP: ", randomly_drop)
+
+    print("\n #######  Training_methods #######")
+    print("Domain Invariant Slot: ", domain_invariant_slot)
     print("Training with single input channel/slot: ", single_slot)
+    print("Randomly assign channels: ", rand_assign_channels)
+    print("Modality to remove: ", modality_remove, "\n")
+
+    if k_fold:
+        print(f"Training split___: {k_fold}")
+
 
     # set index
     img_index = 0
@@ -102,8 +119,9 @@ def main(wandb_active, args):
             channels[key] = [x for x in value if x != modality_remove]
         print(f"Removed {str(modality_remove)} from datasets")
 
+
    
-        
+    
 
     # Set the data size and total modalities
     channels = database_config.channels
@@ -117,25 +135,19 @@ def main(wandb_active, args):
         if domain_invariant_slot == True:
             channels[dataset].append("invar")
 
+        if k_fold is not None:
+            data_size = len(k_fold['train'])
+        else:
+            data_size = max(data_size, train_size[dataset])
+
         total_modalities = total_modalities.union(set(channels[dataset]))
-        data_size = max(data_size, train_size[dataset])
+    
     total_modalities = sorted(list(total_modalities))
     print("Data_size", data_size)
 
-    # Loop for allocating channel
-    channel_map = {}
-
-    for dataset in datasetlist:
-            channel_map[dataset] = utils.map_channels(
-                channels[dataset],
-                total_modalities,
-                rand_assign=rand_assign_channels,
-            )
-
-
 
     # load data    
-    train_loaders,val_loader,data_loader_map = get_dataloader(train_config, database_config,datasetlist, cropped_input_size , data_size,channels_copy)
+    train_loaders,val_loader,data_loader_map = get_dataloader(train_config, database_config,datasetlist, cropped_input_size , data_size,channels_copy,k_fold)
 
     
     # initialize GPU
@@ -165,31 +177,38 @@ def main(wandb_active, args):
     post_trans = Compose([Activations(sigmoid=True), AsDiscrete(threshold=0.5)])
 
     # initialize the model (only show multiunet here)
-    print("In_channels= ", len(total_modalities))
-    print("Batch size = ", train_config.train_batch_size)
 
     if train_config.model_type == "UNET":
         print("TRAINING WITH UNET")
        
         if train_config.single_slot:
             in_channel = 1
+            
         else:
             in_channel = len(total_modalities)
 
         model = (Unet(in_channels=in_channel).to(device))
-        
+
+        print("In_channels= ", len(total_modalities))
+        print("Batch size = ", train_config.train_batch_size)
+
+
+
+       
         optimizer = torch.optim.Adam(model.parameters(), lr=train_config.lr)
         epoched = 0
 
         # load pre-trained weights
         if train_config.load_pre_trained_model:
+
             print("LOADING MODEL: ", load_model_path)
+
             checkpoint = torch.load(
-                load_model_path, map_location={"cuda:0": cuda_id, "cuda:1": cuda_id}
-            )
-            model.load_state_dict(checkpoint["model_state_dict"])
-            optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-            epoched = checkpoint["epoch"] + 1
+                    load_model_path, map_location={"cuda:0": cuda_id, "cuda:1": cuda_id}
+                )
+            
+            model.load_state_dict(checkpoint)         
+   
 
     # defined loss function
     loss_function = DiceLoss(sigmoid=True)
@@ -203,27 +222,47 @@ def main(wandb_active, args):
         best_metric_epoch[dataset] = -1
 
 
-    # wandb watch model and look at model weights. 
-    # if wandb_active:
-    #     wandb.watch(model, log=None,log_freq=1000,log_graph=True)
-        
-    ##training
+    # Loop for allocating channel
+    channel_map = {}
 
-    for epoch in range(epoched, epochs):
+    for dataset in datasetlist:
+        channel_map[dataset] = utils.map_channels(
+            channels[dataset],
+            total_modalities,
+            rand_assign=rand_assign_channels,
+        )
+
+    
+
+    def lr_lambda(current_epoch):
+        # warm up the learning rate.
+        if current_epoch < 50:
+            return (float(current_epoch) + 1) / float(max(1, 50))
+        elif 50 <= current_epoch <= 100:
+            return 1.0
+        else:
+            return max(0.0, 1.0 - (current_epoch - 100) / float(max(1, epochs - 100)))
+            #return max(0.0, 0.5 * (1.0 + math.cos(math.pi * (current_epoch - warmup_epochs) / max(1, args.E - warmup_epochs))))
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
+    
+    ##training##
+
+    for epoch in tqdm(range(epoched, epochs)):
 
         print("-" * 10)
-        print(f"epoch {epoch + 1}/{epochs}")
+        #print(f"epoch {epoch + 1}/{epochs}")
         model.train()
         epoch_loss = 0
         step = 0
 
-        # drop learning rate
-        if (
-            train_config.drop_learning_rate
-            and epoch >= train_config.drop_learning_rate_epoch
-        ):
-            for g in optimizer.param_groups:
-                g["lr"] = train_config.drop_learning_rate_value
+
+        # # drop learning rate
+        # if (
+        #     train_config.drop_learning_rate
+        #     and epoch >= train_config.drop_learning_rate_epoch
+        # ):
+        #     for g in optimizer.param_groups:
+        #         g["lr"] = train_config.drop_learning_rate_value
 
         for batch_data in zip(*train_loaders):
             
@@ -232,7 +271,7 @@ def main(wandb_active, args):
             labels = []
 
             for dataset in datasetlist:
-                # Only for BRATS    BRATS may use different ground truth
+                # Only for BRATS BRATS may use different ground truth
                 if dataset == "BRATS":
                     loader_index = data_loader_map["BRATS"]
                     batch = batch_data[loader_index]
@@ -240,7 +279,7 @@ def main(wandb_active, args):
                     if randomly_drop:
                         modalities_remaining, batch[img_index] = (
                             utils.rand_set_channels_to_zero_with_invar(
-                                channels["BRATS"], batch[img_index],domain_invariant=domain_invariant_slot
+                                channels["BRATS"], batch[img_index],domain_invariant=domain_invariant_slot,mixup =mixup
                             )
                         )
                         for i in range(batch[label_index].shape[0]):
@@ -282,6 +321,10 @@ def main(wandb_active, args):
                                 dtype=np.float32,
                             )
                         )
+
+
+                        if rand_assign_channels:
+                            random.shuffle(channel_map["BRATS"])                        
                     
                         input_data[:, channel_map["BRATS"], :, :, :] = batch[img_index]
                     input_data = input_data.to(device)
@@ -306,7 +349,7 @@ def main(wandb_active, args):
                         if randomly_drop:
                             modalities_remaining, batch[img_index] = (
                                 utils.rand_set_channels_to_zero_with_invar(
-                                    channels["TBI"], batch[img_index],domain_invariant=domain_invariant_slot
+                                    channels["TBI"], batch[img_index],domain_invariant=domain_invariant_slot,mixup = mixup
                                 )
                         )
                         # this part is only relevant for TBI when doing multi channel segmentation with modality drop 
@@ -362,6 +405,10 @@ def main(wandb_active, args):
                                 dtype=np.float32,
                             )
                         )
+
+                        if rand_assign_channels:
+                            random.shuffle(channel_map["TBI"]) 
+
                         input_data[:, channel_map["TBI"], :, :, :] = batch[img_index]
                     
                     input_data = input_data.to(device)
@@ -381,7 +428,7 @@ def main(wandb_active, args):
                     else:
                         if randomly_drop:
                             _, batch[img_index] = utils.rand_set_channels_to_zero_with_invar(
-                                channels[dataset], batch[img_index],domain_invariant=domain_invariant_slot
+                                channels[dataset], batch[img_index],domain_invariant=domain_invariant_slot,mixup = mixup
                             )  # ATLAS WILL ALWAYS BE ONE CHANNEL (no drop)
                         
                         input_data = torch.from_numpy(
@@ -394,7 +441,10 @@ def main(wandb_active, args):
                                 cropped_input_size[2],
                             ),
                             dtype=np.float32,))
-                    
+                        
+                        
+                        if rand_assign_channels:
+                            random.shuffle(channel_map[dataset]) 
                         input_data[:, channel_map[dataset], :, :, :] = batch[img_index]
 
                     input_data = input_data.to(device)
@@ -409,21 +459,24 @@ def main(wandb_active, args):
             combined_labels = torch.cat(labels, dim=0)
             loss = loss_function(combined_outs, combined_labels)
             loss.backward()
+            # added in for the ISLES database LR
             optimizer.step()
             epoch_loss += loss.item()
             epoch_len = data_size // train_config.train_batch_size
             print(f"{step}/{epoch_len}, train_loss: {loss.item():.4f}")
             if wandb_active:
-                wandb.log({"loss": loss.item(), "epoch": epoch + 1})
+                wandb.log({"loss": loss.item(), "epoch": epoch + 1,"lr": optimizer.param_groups[0]["lr"]})
+        scheduler.step()
         epoch_loss /= step
         print(f"epoch {epoch + 1} average loss: {epoch_loss:.4f}")
+        print("\n------------------------\n")
         # save model
         if (epoch + 1) % 50 == 0:
             model_save_name = (
                 model_save_path
                 +    train_config.project_name
                 + "_random_drop_"
-                + str(args.randomly_drop)
+                + str(randomly_drop)
                 + "_"
                 + date
                 + "_Epoch_"
@@ -435,7 +488,7 @@ def main(wandb_active, args):
                 model_save_path
                 +    train_config.project_name
                 + "_random_drop_"
-                + str(args.randomly_drop)
+                + str(randomly_drop)
                 + "_"
                 + date
                 + "_checkpoint_Epoch_"
@@ -500,9 +553,7 @@ def main(wandb_active, args):
                             else:
                                 input_data[:, channel_map[dataset], :, :, :] = val_data[0]
 
-                        # validating the invariant slot on dropped channel.  
-
-
+                        
                         input_data = input_data.to(device)
 
                         if dataset == "BRATS" and database_config.BRATS_two_channel_seg:
@@ -538,6 +589,7 @@ def main(wandb_active, args):
                     sensitivity_metric.reset()
                     precision_metric.reset()
                     IOU_metric.reset()
+                    
                     if metric[dataset]["dice"] > best_metric[dataset]:
                         best_metric[dataset] = metric[dataset]["dice"]
                         best_metric_epoch[dataset] = epoch + 1
@@ -546,7 +598,7 @@ def main(wandb_active, args):
                                 model_save_path
                                 +    train_config.project_name
                                 + "_random_drop_"
-                                + str(args.randomly_drop)
+                                + str(randomly_drop)
                                 + "_"
                                 + date
                                 + "_BEST_"
@@ -579,6 +631,7 @@ def main(wandb_active, args):
                                 "sensitivity_" + dataset: metric[dataset]["sensitivity"],
                                 "precision_" + dataset: metric[dataset]["precision"],
                                 "mIOU_" + dataset: metric[dataset]["IOU"],
+
                             }
                         )
             # average dice across datasets
@@ -590,7 +643,7 @@ def main(wandb_active, args):
                         model_save_path
                         +    train_config.project_name
                         + "_random_drop_"
-                        + str(args.randomly_drop)
+                        + str(randomly_drop)
                         + str(args.datasets)
                         + date
                         + "_BEST_AVERAGE.pth"
@@ -600,15 +653,15 @@ def main(wandb_active, args):
 
                     print(best_avg_dice)
 
-        # # save best checkpoint to 
-        # if wandb_active:
-        #     wandb.log({"Best_Checkpint_Path":model_save_best_name})
+    if wandb_active:
+        wandb.finish()
+    # # save best checkpoint to 
+    # if wandb_active:
+    #     wandb.log({"Best_Checkpint_Path":model_save_best_name})
 
             
                 
 if __name__ == "__main__":
-
-    wandb_active = True
 
     # command line argument
     parser = argparse.ArgumentParser()
@@ -617,21 +670,15 @@ if __name__ == "__main__":
         "--datasets", help="datasets for training, using '_' to separate", type=str
     )
     parser.add_argument(
-        "--randomly_drop",
-        help="0 or 1, 1 if random dropping modalities when training",
-        type=int,
-        default="1",
+        "--k_fold", help="k_fold cross validation number fo folds", type=int, default=None
     )
-    
-    #parser.add_argument("--save_name", help="name of the model to save", type=str)
-     #########################
-    args = parser.parse_args()
-    args.device_id = 1
-    args.datasets = "WMH_MSSEG_BRATS_ATLAS_TBI"
-    #args.randomly_drop =1 
 
+    #########################
+    args = parser.parse_args()
+    args.device_id = 0
+    args.datasets = "ISLES"
+  
     ######################################
 
 
-
-    main(wandb_active = wandb_active, args = args)
+    main(args = args)

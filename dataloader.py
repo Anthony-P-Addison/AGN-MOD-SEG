@@ -10,10 +10,7 @@ from monai.transforms import Transform
 class RemoveChannels(Transform):
     def __init__(self, channels_to_remove=None):
         """
-        Initialize the transformation.
-
-        Args:
-            channels_to_remove (list[int]): List of channel indices to remove.
+        Initialize the transformation
         """
         self.channels_to_remove = channels_to_remove
 
@@ -33,21 +30,50 @@ class RemoveChannels(Transform):
         return img[channels_to_keep, ...]
 
 
-
-def create_dataloader(val_size:int, images:list[Path], segs: list[Path], workers:int, train_batch_size:int, total_train_data_size:int, current_train_data_size:int, cropped_input_size:list,channels_to_remove:list,image_only:bool = False) -> None:
+def create_dataloader(
+    val_size: int,
+    images: list[Path],
+    segs: list[Path],
+    workers: int,
+    train_batch_size: int,
+    total_train_data_size: int,
+    current_train_data_size: int,
+    cropped_input_size: list,
+    channels_to_remove: list,
+    k_fold: dict,
+    image_only: bool = False,
+) -> None:
     """Create monai wrapped dataloaders for training and validation data"""
-    
+
     div = total_train_data_size//current_train_data_size
     rem = total_train_data_size%current_train_data_size
 
     # training and validaiton split and index
 
-    train_images = images[:-val_size]
-    train_images = train_images * div + train_images[:rem]
-    train_segs = segs[:-val_size]
-    train_segs = train_segs * div + train_segs[:rem]
+    # k_fold
+    if val_size == 0:
+        raise ValueError(
+            "Validation size must be greater than 0 for k-fold cross-validation."
+        )
+
+    if k_fold is not None:
+        train_indices = k_fold["train"]
+        val_indices = k_fold["val"]
+        train_images = [images[i] for i in train_indices]
+        train_segs = [segs[i] for i in train_indices]
+        val_images = [images[i] for i in val_indices]
+        val_segs = [segs[i] for i in val_indices]
+
+    else:
+        # standard set up from paper
+        train_images = images[:-val_size]
+        train_images = train_images * div + train_images[:rem]
+        train_segs = segs[:-val_size]
+        train_segs = train_segs * div + train_segs[:rem]
+        val_images = images[-val_size:]
+        val_segs = segs[-val_size:]
     # image augmentation through spatial cropping to size and by randomly rotating
-  
+
     train_imtrans = Compose(
         [
             EnsureChannelFirst(strict_check=True),
@@ -73,26 +99,37 @@ def create_dataloader(val_size:int, images:list[Path], segs: list[Path], workers
     train_ds = ImageDataset(train_images, train_segs, transform=train_imtrans, seg_transform=seg_imtrans)
     train_loader = DataLoader(train_ds, batch_size=train_batch_size, shuffle=True, num_workers=workers, pin_memory=0)
     # create a validation data loader
-    val_ds = ImageDataset(images[-val_size:], segs[-val_size:], transform=val_imtrans, seg_transform=val_segtrans,image_only = image_only)
+    val_ds = ImageDataset(
+        val_images,
+        val_segs,
+        transform=val_imtrans,
+        seg_transform=val_segtrans,
+        image_only=image_only,
+    )
     val_loader = DataLoader(val_ds, batch_size=1, num_workers=workers, pin_memory=0)
-
 
     return train_loader, val_loader
 
 
-
-def get_dataloader(train_config:Training_config, database_config:Database_config,datasetlist:list[str], cropped_input_size:list[int] , data_size:int,channels_copy:dict):
+def get_dataloader(
+    train_config: Training_config,
+    database_config: Database_config,
+    datasetlist: list[str],
+    cropped_input_size: list[int],
+    data_size: int,
+    channels_copy: dict,
+    k_fold: dict,
+):
     """ Get the dataloader for the training and validation data for each dataset in the datasetlist"""
-    
+
     # path initialization
     train_loaders = []
-    #val_loaders = []
+    # val_loaders = []
     val_loader = {}
     data_loader_map = {}
     img_path = database_config.img_path
     seg_path = database_config.seg_path
-   
-    
+
     # get dataloader
     for dataset in datasetlist:
         print("Training: ", dataset)
@@ -100,7 +137,7 @@ def get_dataloader(train_config:Training_config, database_config:Database_config
         images = sorted(glob(os.path.join(img_path[dataset], "*.*")))
         segs = sorted(glob(os.path.join(seg_path[dataset], "*.*")))
 
-        # select channels to remove from the dataset in question. 
+        # select channels to remove from the dataset in question.
         channels_to_remove = get_modalities_drop(dataset, channels_copy[dataset], train_config.modality_remove)
 
         train_loader_one, val_loader[dataset] = create_dataloader(
@@ -112,29 +149,99 @@ def get_dataloader(train_config:Training_config, database_config:Database_config
             total_train_data_size=data_size,
             current_train_data_size=database_config.train_size[dataset],
             cropped_input_size=cropped_input_size,
-            channels_to_remove= channels_to_remove                                                                 
+            channels_to_remove=channels_to_remove,
+            k_fold=k_fold,
         )
         data_loader_map[dataset] = len(train_loaders)
         train_loaders.append(train_loader_one)
 
-        #TODO: can remove the val-loaders list i am pretty sure as does not get called later in script
-        #val_loaders.append(val_loader[dataset])
+        # TODO: can remove the val-loaders list i am pretty sure as does not get called later in script
+        # val_loaders.append(val_loader[dataset])
 
     return train_loaders, val_loader, data_loader_map  
 
 
-
-
-def get_modalities_drop(dataset:str, modalities_present:list[str], drop_modality:str) -> list[int]:
+def get_modalities_drop(
+    dataset: str, modalities_present: list[str], remove_modality: str
+) -> list[int]:
     """Get the modalities to drop from the image tensor"""
-    if drop_modality is None:
+
+    if remove_modality is None:
         return None
 
-    if drop_modality in modalities_present and len(modalities_present) == 1:
-        raise ValueError (f"Modality {drop_modality} is the only modality present in dataset {dataset}")
+    if remove_modality in modalities_present and len(modalities_present) == 1:
+        raise ValueError(
+            f"Modality {remove_modality} is the only modality present in dataset {dataset}"
+        )
 
-    if drop_modality not in modalities_present:
-        print(f"Modality {drop_modality} not present in dataset {dataset}")
-    
-    return [i for i, modality in enumerate(modalities_present) if modality == drop_modality]
-   
+    if remove_modality not in modalities_present:
+        print(f"Modality {remove_modality} not present in dataset {dataset}")
+
+    return [
+        i
+        for i, modality in enumerate(modalities_present)
+        if modality == remove_modality
+    ]
+
+
+################# FOR INFERENCE SCRIPT ####################
+
+
+def create_test_val_loader(
+    val_size: int,
+    images,
+    segs,
+    workers: int,
+    dataset: str,
+    modality_remove: str,
+    channels: dict,
+    image_only: bool = False,
+):
+    """Create monai wrapped dataloaders for validation data"""
+
+    # image augmentation through spatial cropping to size and by randomly rotating
+
+    channels_to_remove = get_modalities_drop(dataset, channels, modality_remove)
+
+    val_imtrans = Compose([EnsureChannelFirst(), RemoveChannels(channels_to_remove)])
+    val_segtrans = Compose([EnsureChannelFirst()])
+    # create a training data loader
+
+    # create a validation data loader
+    val_ds = ImageDataset(
+        images[-val_size:],
+        segs[-val_size:],
+        transform=val_imtrans,
+        seg_transform=val_segtrans,
+        image_only=image_only,
+    )
+
+    val_loader = DataLoader(val_ds, batch_size=1, num_workers=workers, pin_memory=0)
+
+    return val_loader
+
+
+########################################################################
+
+
+if "__main__" == __name__:
+
+    # TEST GET_MODALITIES DROP
+    yo = get_modalities_drop("BRATS", ["T1", "T2", "T1ce", "FLAIR"], "FLAIR")
+    print(yo)
+
+    # TEST GET_DATALOADER
+    train_config = Training_config()
+    database_config = Database_config()
+    datasetlist = ["BRATS", "ATLAS"]
+    cropped_input_size = [128, 128, 128]
+    data_size = 100
+    channels_copy = {"BRATS": ["T1", "T2", "T1C", "FLAIR"], "ATLAS": ["T1"]}
+    train_loaders, val_loader, data_loader_map = get_dataloader(
+        train_config,
+        database_config,
+        datasetlist,
+        cropped_input_size,
+        data_size,
+        channels_copy,
+    )
