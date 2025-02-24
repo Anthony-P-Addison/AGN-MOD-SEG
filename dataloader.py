@@ -5,6 +5,9 @@ from monai.transforms import Compose, EnsureChannelFirst, RandSpatialCrop, RandR
 import os
 from pathlib import Path
 from monai.transforms import Transform
+import numpy as np
+from collections import defaultdict
+import nibabel as nib
 
 
 class RemoveChannels(Transform):
@@ -30,6 +33,16 @@ class RemoveChannels(Transform):
         return img[channels_to_keep, ...]
 
 
+
+# Function to calculate the mean of an image
+
+def compute_image_mean(img):
+
+    return img.mean()
+
+
+
+
 def create_dataloader(
     val_size: int,
     images: list[Path],
@@ -45,12 +58,13 @@ def create_dataloader(
 ) -> None:
     """Create monai wrapped dataloaders for training and validation data"""
 
-    div = total_train_data_size//current_train_data_size
-    rem = total_train_data_size%current_train_data_size
+    if k_fold is None:
+        div = total_train_data_size//current_train_data_size
+        rem = total_train_data_size%current_train_data_size
 
     # training and validaiton split and index
 
-    # k_fold
+    #k_fold
     if val_size == 0:
         raise ValueError(
             "Validation size must be greater than 0 for k-fold cross-validation."
@@ -96,8 +110,15 @@ def create_dataloader(
     val_imtrans = Compose([EnsureChannelFirst(),RemoveChannels(channels_to_remove)])
     val_segtrans = Compose([EnsureChannelFirst()])
     # create a training data loader
+    
+    ############# Calculate the mean of each individual image before being cropped #######################
+  
+
     train_ds = ImageDataset(train_images, train_segs, transform=train_imtrans, seg_transform=seg_imtrans)
+    ######################################################
+    # Create a training data loader
     train_loader = DataLoader(train_ds, batch_size=train_batch_size, shuffle=True, num_workers=workers, pin_memory=0)
+
     # create a validation data loader
     val_ds = ImageDataset(
         val_images,
@@ -108,6 +129,42 @@ def create_dataloader(
     )
     val_loader = DataLoader(val_ds, batch_size=1, num_workers=workers, pin_memory=0)
 
+    ################# Attach the original means to the dataloaders ############################
+
+    # Calculate the mean of each individual image before being cropped
+    
+    
+
+    # Create a training data loader with original means
+    train_ds = ImageDataset(train_images, train_segs, transform=train_imtrans, seg_transform=seg_imtrans)
+  
+    # Create a custom dataset class to include the mean
+    # class CustomImageDataset(ImageDataset):
+    #     def __init__(self, *args, means, **kwargs):
+    #         super().__init__(*args, **kwargs)
+    #         self.means = means
+
+    #     def __getitem__(self, index):
+    #         data = super().__getitem__(index)
+    #         mean = self.means[index]
+    #         return data[0], data[1], mean
+
+    # Create a training data loader with original means
+    
+    train_loader = DataLoader(train_ds, batch_size=train_batch_size, shuffle=True, num_workers=workers, pin_memory=0)
+
+    # Create a validation data loader with original means
+    val_ds = ImageDataset(
+        val_images,
+        val_segs,
+        transform=val_imtrans,
+        seg_transform=val_segtrans,
+        image_only=image_only,
+    )
+    val_loader = DataLoader(val_ds, batch_size=1, num_workers=workers, pin_memory=0)
+
+    # Attach the original means to the dataloaders
+    
     return train_loader, val_loader
 
 

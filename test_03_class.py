@@ -5,7 +5,7 @@ from monai.data import decollate_batch
 from monai.inferers import sliding_window_inference
 from monai.metrics import DiceMetric, ConfusionMatrixMetric, MeanIoU
 from monai.transforms import Activations, AsDiscrete, Compose
-from nets.unet import Unet
+from nets.unet import res_unet as Unet    
 import numpy as np
 import utils
 import config
@@ -17,8 +17,9 @@ import copy
 
 
 class ModelTester:
-    def __init__(self, args):
+    def __init__(self, args,checkpoint):
         self.args = args
+        self.checkpoint = checkpoint
         self.initialize_variables()
         self.setup_modalities()
         self.initialize_metrics()
@@ -41,6 +42,8 @@ class ModelTester:
         self.cuda_id = "cuda:" + str(self.args.device_id)
         self.device = torch.device(self.cuda_id)
 
+        self.test_config.model_file_path = self.checkpoint
+
     def setup_modalities(self):
         self.channels_copy = copy.deepcopy(self.database_config.channels)
         for data in self.datasetlist:
@@ -54,12 +57,15 @@ class ModelTester:
             if  self.test_config.modality_remove is not None:
                 self.database_config.channels[data] = [modality for modality in self.database_config.channels[data] if modality != self.test_config.modality_remove]
 
+            if self.test_config.domain_invariant_slot:
+                self.total_modalities.add("invar")
+            
             self.total_modalities = self.total_modalities.union(set(self.database_config.channels[data]))
             self.data_size = max(self.data_size, self.database_config.train_size[data])
 
         self.total_modalities = sorted(list(self.total_modalities))
 
-        # dataset to test
+        # dataset to test (the above was for dataset trained on
         if self.test_config.modality_rem_train is not None:
             self.database_config.channels[self.datasets_to_test] = ["invar" if modality == self.test_config.modality_rem_train else modality for modality in self.database_config.channels[self.datasets_to_test]]     
         if  self.test_config.modality_remove is not None:
@@ -147,6 +153,7 @@ class ModelTester:
 
                 input_data = val_data[0].to(self.device)
 
+                self.database_config.TBI_multichannel = False
                 if dataset == "BRATS" and self.database_config.BRATS_two_channel_seg:
                     label = val_data[1][:, [0], :, :, :].to(self.device)
                 elif dataset == "TBI" and self.database_config.TBI_multichannel:
@@ -218,7 +225,6 @@ class ModelTester:
 
  
 
-
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
@@ -243,15 +249,57 @@ if __name__ == "__main__":
 
     ####################
 
-    args.datasets_to_test = 'ISLES' # dataset for testing
-    args.modalities_to_test = "0_1_2"       # numeric order of modalities
-    args.test_all_combinations = 1
-    args.device_id = 0
-    args.trained_on = 'WMH_MSSEG_BRATS_ATLAS_TBI' # The datasets the model was trained on
+    args.datasets_to_test = 'ISLES' #'TBI' # dataset for testing
+    args.modalities_to_test ="0_1_2_3"       # numeric order of modalities
+    args.test_all_combinations = 0
+    args.device_id = 1
+    args.trained_on = 'WMH_ATLAS_BRATS_TBI_MSSEG'    # The datasets the model was trained on
     #########################
 
 
-    tester = ModelTester(args)
-    tester.run()
+    checkpoint=['/home/magd6292/Documents/wentian_clone/MultiUnet/models/Mixup/_model_remove:_None/WMH_MSSEG_BRATS_ATLAS_TBI/2025-01-31_00-27/Mixup_random_drop_True_2025-01-31_00-27_Epoch_49.pth',
+    '/home/magd6292/Documents/wentian_clone/MultiUnet/models/Mixup/_model_remove:_None/WMH_MSSEG_BRATS_ATLAS_TBI/2025-01-31_00-27/Mixup_random_drop_True_2025-01-31_00-27_Epoch_99.pth',
+    '/home/magd6292/Documents/wentian_clone/MultiUnet/models/Mixup/_model_remove:_None/WMH_MSSEG_BRATS_ATLAS_TBI/2025-01-31_00-27/Mixup_random_drop_True_2025-01-31_00-27_Epoch_149.pth',
+    '/home/magd6292/Documents/wentian_clone/MultiUnet/models/Mixup/_model_remove:_None/WMH_MSSEG_BRATS_ATLAS_TBI/2025-01-31_00-27/Mixup_random_drop_True_2025-01-31_00-27_Epoch_199.pth',
+    '/home/magd6292/Documents/wentian_clone/MultiUnet/models/Mixup/_model_remove:_None/WMH_MSSEG_BRATS_ATLAS_TBI/2025-01-31_00-27/Mixup_random_drop_True_2025-01-31_00-27_Epoch_249.pth',
+    '/home/magd6292/Documents/wentian_clone/MultiUnet/models/Mixup/_model_remove:_None/WMH_MSSEG_BRATS_ATLAS_TBI/2025-01-31_00-27/Mixup_random_drop_True_2025-01-31_00-27_Epoch_299.pth',
+    '/home/magd6292/Documents/wentian_clone/MultiUnet/models/Mixup/_model_remove:_None/WMH_MSSEG_BRATS_ATLAS_TBI/2025-01-31_00-27/Mixup_random_drop_True_2025-01-31_00-27_Epoch_349.pth',
+    '/home/magd6292/Documents/wentian_clone/MultiUnet/models/Mixup/_model_remove:_None/WMH_MSSEG_BRATS_ATLAS_TBI/2025-01-31_00-27/Mixup_random_drop_True_2025-01-31_00-27_Epoch_399.pth',
+    '/home/magd6292/Documents/wentian_clone/MultiUnet/models/Mixup/_model_remove:_None/WMH_MSSEG_BRATS_ATLAS_TBI/2025-01-31_00-27/Mixup_random_drop_True_2025-01-31_00-27_Epoch_449.pth',
+    '/home/magd6292/Documents/wentian_clone/MultiUnet/models/Mixup/_model_remove:_None/WMH_MSSEG_BRATS_ATLAS_TBI/2025-01-31_00-27/Mixup_random_drop_True_2025-01-31_00-27_Epoch_499.pth',
+    '/home/magd6292/Documents/wentian_clone/MultiUnet/models/Mixup/_model_remove:_None/WMH_MSSEG_BRATS_ATLAS_TBI/2025-01-31_00-27/Mixup_random_drop_True_2025-01-31_00-27_Epoch_549.pth',
+    '/home/magd6292/Documents/wentian_clone/MultiUnet/models/Mixup/_model_remove:_None/WMH_MSSEG_BRATS_ATLAS_TBI/2025-01-31_00-27/Mixup_random_drop_True_2025-01-31_00-27_Epoch_599.pth']
+
+
+    
+    #checkpoint1 = [
+        # # 'models/standard/new_test_BRATS_ATLAS_WMH_MSSEG_TBI_random_drop_0_Epoch_49.pth',
+        # # 'models/standard/new_test_BRATS_ATLAS_WMH_MSSEG_TBI_random_drop_0_Epoch_99.pth',
+        # 'models/standard/new_test_BRATS_ATLAS_WMH_MSSEG_TBI_random_drop_0_Epoch_149.pth',
+        # 'models/standard/new_test_BRATS_ATLAS_WMH_MSSEG_TBI_random_drop_0_Epoch_199.pth',
+        # 'models/standard/new_test_BRATS_ATLAS_WMH_MSSEG_TBI_random_drop_0_Epoch_249.pth',
+        # 'models/standard/new_test_BRATS_ATLAS_WMH_MSSEG_TBI_random_drop_0_Epoch_299.pth',
+        # 'models/standard/new_test_BRATS_ATLAS_WMH_MSSEG_TBI_random_drop_0_Epoch_349.pth',
+        # 'models/standard/new_test_BRATS_ATLAS_WMH_MSSEG_TBI_random_drop_0_Epoch_399.pth',
+        # 'models/standard/new_test_BRATS_ATLAS_WMH_MSSEG_TBI_random_drop_0_Epoch_449.pth',
+        # 'models/standard/new_test_BRATS_ATLAS_WMH_MSSEG_TBI_random_drop_0_Epoch_499.pth',
+        #'models/standard/new_test_BRATS_ATLAS_WMH_MSSEG_TBI_random_drop_0_Epoch_549.pth',
+        # 'models/standard/new_test_BRATS_ATLAS_WMH_MSSEG_TBI_random_drop_0_Epoch_599.pth'
+    #]
+
+    checkpoint1 = ['models/Mixup/_model_remove:_None/MSSEG_TBI_BRATS_WMH_ATLAS/2025-02-21_23-40/Mixup_random_drop_True_2025-02-21_23-40_Epoch_149.pth']
+    #['models/all_in_one/_model_remove:_None/TBI/2025-02-13_21-31/all_in_one_random_drop_False_2025-02-13_21-31_Epoch_599.pth']
+
+
+
+    for file in checkpoint1:
+
+        tester = ModelTester(args,file)
+        x=tester.run()
+    
+
+
+    
+# msse - 0.5438 after 240 epochs 
 
 

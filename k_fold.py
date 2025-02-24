@@ -2,8 +2,10 @@ from train_2 import main
 from config import Training_config, Database_config
 import argparse
 import numpy as np
+import copy
 
-####### k_fold cross validatin #######
+
+####### k_fold cross validation #######
 
 # create funciton which goes into dataset of argsdatsaet and return a dictionary of 3 plits of the data
 
@@ -38,8 +40,8 @@ parser.add_argument(
 
 #########################
 args = parser.parse_args()
-args.device_id = 0
-args.datasets = "ISLES"
+args.device_id = 1
+args.datasets = "TBI"
 args.k_fold = 4
 
 ######################################
@@ -49,6 +51,26 @@ total_size = Database_config.total_size[args.datasets]
 
 split_datasets = split_dataset(total_size, args.k_fold)
 
-for i, split in enumerate(split_datasets):
-    main(args, split)
+train_config =  Training_config()
+database_config = Database_config()
+channels_copy = copy.deepcopy(database_config.channels)
 
+
+
+split = split_datasets[-1]
+main(train_config,database_config,split,args,channels_copy)
+
+
+
+
+
+# for i, split in enumerate(split_datasets):
+
+#     main(train_config,database_config,split,args,channels_copy)
+
+
+
+
+  
+
+#TODO: fors isles try a batch size of 8/10 and  try a slightly smaller max learning rate. 

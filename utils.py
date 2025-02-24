@@ -1,13 +1,12 @@
 import random
 import numpy as np
 import torch
-from nets.unet import Unet
+from nets.unet import res_unet as Unet
 from itertools import combinations
 import nibabel as nib
 from monai.transforms import  Compose,EnsureChannelFirst
 from monai.data import ImageDataset, DataLoader
 from augment_utils import mixup_data
-
 
 
 def map_channels(dataset_channels: list[str], total_modalities: list[str],rand_assign: bool,) -> list[int]:
@@ -29,7 +28,6 @@ def map_channels(dataset_channels: list[str], total_modalities: list[str],rand_a
     return channel_map
 
 
-
 def rand_set_channels_to_zero(dataset_modalities: list, batch_img_data: torch.Tensor):
     """Randomly set a subset of channels to zero"""
     modalities_remaining=[]
@@ -42,70 +40,147 @@ def rand_set_channels_to_zero(dataset_modalities: list, batch_img_data: torch.Te
     return modalities_remaining, batch_img_data
 
 
-def rand_set_channels_to_zero_with_invar(dataset_modalities: list, batch_img_data: torch.Tensor, domain_invariant:bool,mixup:bool) -> tuple[list[int], torch.Tensor]:
+def rand_set_channels_to_zero_with_invar(
+    dataset_modalities: list,
+    batch_img_data: torch.Tensor,
+    domain_invariant: bool,
+    mixup: bool,
+    batch_label_data: torch.Tensor,
+) -> tuple[list[int], torch.Tensor]:
     """Randomly set a subset of channels to zero
     return a list of modalities remaining(after drop) and an image tensors from remaining channels """
-    modalities_remaining=[]
-    
+    modalities_remain = []
+
     if domain_invariant:
         # append a new channel to dimension 1
-        batch_img_da = torch.cat((batch_img_data, torch.zeros((batch_img_data.shape[0], 1, 128, 128, 128))), dim=1)
+        batch_img_da = torch.cat((batch_img_data, torch.zeros((batch_img_data.shape[0], 1, 112, 112, 112))), dim=1)
     else:
         batch_img_da = batch_img_data
 
     for i in range (batch_img_da.shape[0]):   
 
-        if domain_invariant:
-            # start from 1 dropped as added modality is zeros so is effectively dropped. 
+        if domain_invariant and not mixup:
+            # just for dropping the non invaraint channels
             number_of_dropped_modalities = np.random.randint(1,len(dataset_modalities))
         else:
             number_of_dropped_modalities = np.random.randint(0,len(dataset_modalities))    
+
+         
+        if len(dataset_modalities) == 2:     #brats
+            modalities_dropped = [1]
+            #modalities_dropped = [0] if np.random.rand() > 0.80 else [1]
         
-        modalities_dropped = random.sample(list(np.arange(len(dataset_modalities))), number_of_dropped_modalities)    
-        modalities_dropped.sort()
+        else:
+
+            modalities_dropped = random.sample(
+                list(np.arange(len(dataset_modalities))),       # drop channels including invariant [:-1]
+                number_of_dropped_modalities,
+            )
         
+            modalities_dropped.sort()
+
         # copy of batch image data
         batch_img = batch_img_da.clone()
 
-        # multiplied dropped channels by zero. 
+        # multiplied dropped channels by zero.
         batch_img_da[i,modalities_dropped,:,:,:] = 0
-        modalities_remaining.append(list(set(np.arange(len(dataset_modalities))) - set(modalities_dropped)))   
-        #print(f'modalities_remaining: {modalities_remaining}')
+        modalities_remaining = sorted(
+            set(np.arange(len(dataset_modalities))) - set(modalities_dropped)
+        )
 
-        if domain_invariant:
+        # adding data to the invariant slot
+        if domain_invariant: 
+
             
-            # if invar channel in modalities dropped, then always drop this channel so has same oribability of other channels being dropped. 
-            if modalities_dropped[-1] == len(dataset_modalities)-1:
-                batch_img_da = batch_img_da
-            
-            else:
+            if mixup ==True: 
+
+                if len(modalities_dropped) == 0:
+                    if modalities_remaining[-1] == len(dataset_modalities) - 1 and len(modalities_remaining) > 1: 
+                        modalities_remaining = modalities_remaining[:-1]
+
+                    channel_add = random.sample(modalities_remaining, 2)    
+                    invar= mixup_data(
+                        batch_img[i, channel_add, :, :], all_mod_dropped=False, one_mod_dropped =False, two_not_dropped =True, mod_3 = False
+                    )
+    
+
+                elif (modalities_dropped[-1] == len(dataset_modalities)- 1):  # should stop the zero channel multiplications
+                    # remain 0 
+                    invar = batch_img[i,[-1],:,:,:]
+
+                ###### tumors_mix ####
+
+                #yo =random.uniform(0, 1)
+
+                # # select labels to mix
+                # label_channel = random.sample(
+                #     list(np.arange(len(dataset_modalities))), 2
+                # )
+                # # broadcast label to channels
+                # masked_image_tensor = (
+                #     batch_img[i,label_channel, :, :, :]
+                #     * batch_label_data[i,:, :, :, :]
+                # )
+                elif  len(modalities_dropped) == 2:
+                    channel_add = random.sample(modalities_dropped, 2)
+                    invar = mixup_data(
+                        batch_img[i, channel_add, :, :], all_mod_dropped=True, one_mod_dropped =False, two_not_dropped =False, mod_3 = False,
+                    )
+                    # if yo > 0.5:
+                    #     invar_tumor, _ = mixup_data(
+                    #         masked_image_tensor, all_mod_dropped=True
+                    #     )
+
+                    #     invar[invar_tumor > 0] = invar_tumor[invar_tumor > 0]
+
+                # For mixing 3 samples
+                elif len(modalities_dropped) > 2:
+                    channel_add = random.sample(modalities_dropped, 3)
+                    invar= mixup_data(
+                        batch_img[i, channel_add, :, :], all_mod_dropped=False, one_mod_dropped =False, two_not_dropped =False, mod_3 = True, 
+                    )
+
+                elif len(modalities_dropped) == 1:
+                    if modalities_remaining[-1] == len(dataset_modalities) - 1 and len(modalities_remaining) > 1:  # priorities mixing for  samples over invariant. 
+                        modalities_remaining = modalities_remaining[:-1]
+                    channel_add = (
+                        random.sample(modalities_remaining, 1) + modalities_dropped
+                    )
+                    invar= mixup_data(
+                        batch_img[i, channel_add, :, :], all_mod_dropped=False, one_mod_dropped =True, two_not_dropped =False, mod_3 = False,
+                    )
+
+                # if yo > 0.5:
+                #     invar_tumor, _ = mixup_data(
+                #         masked_image_tensor, all_mod_dropped=False
+                #     )
+                #     invar[invar_tumor > 0] = invar_tumor[invar_tumor > 0]
+
+            ###################################################
+            # import matplotlib.pyplot as plt
+
+            # # Plot the invariant channel as a slice
+            # invar_np = invar.cpu().numpy()
+            # x_slice_0 = invar_np[:, :, 64]
+
+            # plt.figure(figsize=(12, 4))
+
+            # plt.subplot(1, 3, 1)
+            # plt.imshow(x_slice_0, cmap="gray")
+            # plt.title("Original Image 1")
+            # plt.axis("off")
+
+            else: 
                 channel_add = random.sample(modalities_dropped, 1)
+                invar = batch_img[i,channel_add,:,:,:]
 
-                # use mixup here. 
-                if mixup ==True: 
-                    if len(modalities_dropped) >1:
-                        channel_add = random.sample(modalities_dropped, 2)
+        # print(f' channel being added {batch_img[i,channel_add,:,:,:]} ' )
+        invar = torch.unsqueeze(invar, 0)
+        batch_img_da[i,[len(dataset_modalities)-1],:,:,:]=invar
+    
+    modalities_remain.append(modalities_remaining)
 
-                    elif len(modalities_dropped) == 1:
-                        # mix with randomly selected data point from undropped data
-
-                        channel_add = random.sample(modalities_remaining, 1) +modalities_dropped
-                    invar,_ = mixup_data(batch_img[i,channel_add,:,:,:],batch_img[i,channel_add[1],:,:,:],2)
-                else: 
-                    channel_add = random.sample(modalities_dropped, 1)
-                    invar = batch_img[i,channel_add,:,:,:]
-                
-                #select channel to be added to invariant slot
-                invar = batch_img[i,channel_add,:,:,:]  
-                #print(f' channel being added {batch_img[i,channel_add,:,:,:]} ' )
-                invar = torch.unsqueeze(invar,1)
-                batch_img_da[i,[len(dataset_modalities)-1],:,:,:]=invar
-
-                # double check that the invariant slot is the same as the selected dropped channel
-                # result = torch.allclose(batch_img_da[i][-1],batch_img[i][channel_add])
-                #print(f"Assert selected dropped channel is coancatenated: {result}")
-                          
-    return modalities_remaining, batch_img_da
+    return modalities_remain, batch_img_da
 
 
 def single_slot( batch_img_data: torch.Tensor):
@@ -119,8 +194,6 @@ def single_slot( batch_img_data: torch.Tensor):
         # Copy the selected channel to the output tensor
         batch_img_da[i, 0, :, :, :] = batch_img_data[i, selected_channel, :, :, :]
     return batch_img_da,[selected_channel]
-
-
 
 
 def create_net(model_file_path,model_net_type,model_modalities_trained_on, device,cuda_id):
@@ -160,11 +233,11 @@ def create_single_channel_UNET_input(batch, modalities, dataset_name,model_modal
 #     """Create input data for UNET model"""
 #     # Initialize input_data tensor with zeros
 #     input_data = torch.from_numpy(np.zeros((1, model_modalities_trained_on, batch[0].shape[2], batch[0].shape[3], batch[0].shape[4]), dtype=np.float32))
-    
+
 #     # Copy data into input_data based on model_channel_map
 #     input_data[:, model_channel_map[dataset_name], :, :, :] = batch[0][:, modalities, :, :, :]
-    
-    
+
+
 #     return input_data
 
 
@@ -193,8 +266,6 @@ def modality_select_invar(dataset: list, modality: str) -> list:
     return updated_modalities
 
 
-
-
 def add_input_to_pre_trained(model:dict)-> dict:
 
     """Add additional input channel to the first layer of a pre trained model"""
@@ -219,9 +290,6 @@ def add_input_to_pre_trained(model:dict)-> dict:
     print(f'Input channels of model after update: {model["conv_1.conv.unit0.conv.weight"][1][4]}')
 
     return model
-
-
-
 
 
 def create_test_val_loader(
@@ -250,10 +318,6 @@ def create_test_val_loader(
     
     val_loader = DataLoader(val_ds, batch_size=1, num_workers=workers, pin_memory=0)
     return val_loader
-
-
-
-
 
 
 if __name__ == "__main__":

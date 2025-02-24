@@ -6,7 +6,8 @@ from monai.inferers import sliding_window_inference
 from monai.metrics import DiceMetric, ConfusionMatrixMetric, MeanIoU
 from monai.transforms import Activations, AsDiscrete, Compose
 from monai.losses.dice import DiceLoss
-from nets.unet import Unet
+from nets.unet import res_unet as Unet
+from nets.invariant_channel import CustomUNet
 import numpy as np
 import utils
 import wandb
@@ -20,16 +21,12 @@ import random
 
 
 
-def main (args,k_fold=None):
-    
-    ###### move this #### 
-    mixup = False
+def main (train_config,database_config,k_fold,args,channels_copy):
+
 
     torch.multiprocessing.set_sharing_strategy("file_system")
 
     # load config
-    train_config = config.Training_config()
-    database_config = config.Database_config()
 
     rand_assign_channels = train_config.rand_assign_channels
     domain_invariant_slot = train_config.domain_invariant_slot
@@ -38,9 +35,9 @@ def main (args,k_fold=None):
     randomly_drop = bool(train_config.random_drop)
     single_slot = train_config.single_slot
     wandb_active = train_config.wandb_active
+    mixup = train_config.mixup
    
    
-    
 
     if randomly_drop and single_slot:
         raise ValueError("Cannot have both random drop and single slot")
@@ -110,7 +107,7 @@ def main (args,k_fold=None):
     # set index
     img_index = 0
     label_index = 1
-    channels_copy = copy.deepcopy(database_config.channels)
+   
 
     if modality_remove !=  None:  
         # from channels remove one modality for all datasets in question
@@ -119,9 +116,6 @@ def main (args,k_fold=None):
             channels[key] = [x for x in value if x != modality_remove]
         print(f"Removed {str(modality_remove)} from datasets")
 
-
-   
-    
 
     # Set the data size and total modalities
     channels = database_config.channels
@@ -148,14 +142,14 @@ def main (args,k_fold=None):
 
     # load data    
     train_loaders,val_loader,data_loader_map = get_dataloader(train_config, database_config,datasetlist, cropped_input_size , data_size,channels_copy,k_fold)
-
-    
+    # print('load WMH only for validation:')
+    ISLES_loader,WMH_val_loader,data_laod = get_dataloader(train_config, database_config,["WMH"], cropped_input_size , data_size,channels_copy,k_fold)
     # initialize GPU
     print("Running on GPU:" + str(args.device_id))
     print("Running for epochs:" + str(epochs))
     cuda_id = "cuda:" + str(args.device_id)
     device = torch.device(cuda_id)
-    torch.cuda.set_device(cuda_id)
+    #torch.cuda.set_device(cuda_id)
 
     # initialize metrics
     dice_metric = DiceMetric(
@@ -187,7 +181,11 @@ def main (args,k_fold=None):
         else:
             in_channel = len(total_modalities)
 
-        model = (Unet(in_channels=in_channel).to(device))
+        
+        model = CustomUNet(in_channels=in_channel).to(device)
+        #model = (Unet(in_channels=in_channel).to(device))
+
+        
 
         print("In_channels= ", len(total_modalities))
         print("Batch size = ", train_config.train_batch_size)
@@ -232,18 +230,18 @@ def main (args,k_fold=None):
             rand_assign=rand_assign_channels,
         )
 
-    
+    ### for isles training ####
 
-    def lr_lambda(current_epoch):
-        # warm up the learning rate.
-        if current_epoch < 50:
-            return (float(current_epoch) + 1) / float(max(1, 50))
-        elif 50 <= current_epoch <= 100:
-            return 1.0
-        else:
-            return max(0.0, 1.0 - (current_epoch - 100) / float(max(1, epochs - 100)))
-            #return max(0.0, 0.5 * (1.0 + math.cos(math.pi * (current_epoch - warmup_epochs) / max(1, args.E - warmup_epochs))))
-    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
+    # def lr_lambda(current_epoch):
+    #     # warm up the learning rate.
+    #     if current_epoch < 50:
+    #         return (float(current_epoch) + 1) / float(max(1, 50))
+    #     elif 50 <= current_epoch <= 250:
+    #         return 1.0
+    #     else:
+    #         return max(0.0, 1.0 - (current_epoch - 100) / float(max(1, epochs - 250)))
+    #         #return max(0.0, 0.5 * (1.0 + math.cos(math.pi * (current_epoch - warmup_epochs) / max(1, args.E - warmup_epochs))))
+    # scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
     
     ##training##
 
@@ -256,13 +254,13 @@ def main (args,k_fold=None):
         step = 0
 
 
-        # # drop learning rate
-        # if (
-        #     train_config.drop_learning_rate
-        #     and epoch >= train_config.drop_learning_rate_epoch
-        # ):
-        #     for g in optimizer.param_groups:
-        #         g["lr"] = train_config.drop_learning_rate_value
+        # #drop learning rate
+        if (
+            train_config.drop_learning_rate
+            and epoch >= train_config.drop_learning_rate_epoch
+        ):
+            for g in optimizer.param_groups:
+                g["lr"] = train_config.drop_learning_rate_value
 
         for batch_data in zip(*train_loaders):
             
@@ -271,6 +269,7 @@ def main (args,k_fold=None):
             labels = []
 
             for dataset in datasetlist:
+             
                 # Only for BRATS BRATS may use different ground truth
                 if dataset == "BRATS":
                     loader_index = data_loader_map["BRATS"]
@@ -279,7 +278,7 @@ def main (args,k_fold=None):
                     if randomly_drop:
                         modalities_remaining, batch[img_index] = (
                             utils.rand_set_channels_to_zero_with_invar(
-                                channels["BRATS"], batch[img_index],domain_invariant=domain_invariant_slot,mixup =mixup
+                                channels["BRATS"], batch[img_index],domain_invariant=domain_invariant_slot,mixup =mixup,batch_label_data=batch[label_index]
                             )
                         )
                         for i in range(batch[label_index].shape[0]):
@@ -349,7 +348,7 @@ def main (args,k_fold=None):
                         if randomly_drop:
                             modalities_remaining, batch[img_index] = (
                                 utils.rand_set_channels_to_zero_with_invar(
-                                    channels["TBI"], batch[img_index],domain_invariant=domain_invariant_slot,mixup = mixup
+                                    channels["TBI"], batch[img_index],domain_invariant=domain_invariant_slot,mixup = mixup,batch_label_data=batch[label_index]
                                 )
                         )
                         # this part is only relevant for TBI when doing multi channel segmentation with modality drop 
@@ -420,6 +419,8 @@ def main (args,k_fold=None):
                 else:  # other databases are similar
                     loader_index = data_loader_map[dataset]
                     batch = batch_data[loader_index]
+                  
+                    # Perform cropping or other transformations here
 
                     if single_slot:
                         input_data,_ = utils.single_slot(batch[img_index])
@@ -428,7 +429,7 @@ def main (args,k_fold=None):
                     else:
                         if randomly_drop:
                             _, batch[img_index] = utils.rand_set_channels_to_zero_with_invar(
-                                channels[dataset], batch[img_index],domain_invariant=domain_invariant_slot,mixup = mixup
+                                channels[dataset], batch[img_index],domain_invariant=domain_invariant_slot,mixup = mixup, batch_label_data = batch[label_index]
                             )  # ATLAS WILL ALWAYS BE ONE CHANNEL (no drop)
                         
                         input_data = torch.from_numpy(
@@ -453,20 +454,23 @@ def main (args,k_fold=None):
                     out = model(input_data)
                     outputs.append(out)
                     labels.append(label)
+                 
                     
             optimizer.zero_grad()
             combined_outs = torch.cat(outputs, dim=0)
             combined_labels = torch.cat(labels, dim=0)
             loss = loss_function(combined_outs, combined_labels)
+            if torch.isnan(loss):
+                raise ValueError("Loss produced NaN value")
             loss.backward()
-            # added in for the ISLES database LR
             optimizer.step()
             epoch_loss += loss.item()
             epoch_len = data_size // train_config.train_batch_size
             print(f"{step}/{epoch_len}, train_loss: {loss.item():.4f}")
             if wandb_active:
                 wandb.log({"loss": loss.item(), "epoch": epoch + 1,"lr": optimizer.param_groups[0]["lr"]})
-        scheduler.step()
+          
+        # scheduler.step()
         epoch_loss /= step
         print(f"epoch {epoch + 1} average loss: {epoch_loss:.4f}")
         print("\n------------------------\n")
@@ -507,12 +511,11 @@ def main (args,k_fold=None):
             )
             print("Saved Model")
 
+
             # if wandb_active:
             #     wandb.log({"model_save_name":model_save_name})
 
         # validation
-
-        
 
         if (epoch + 1) % train_config.val_interval == 0:
             model.eval()
@@ -527,6 +530,101 @@ def main (args,k_fold=None):
                 precision_metric.reset()
                 IOU_metric.reset()
                 total_av_dice = list()
+
+                ################ I want to test isles as I go along to see how it does #######################
+                
+                
+                for val_data in WMH_val_loader["WMH"]:
+                    
+                    channels['WMH'] = [x if x != 'FLAIR' else 'invar' for x in channels['WMH']]
+                     
+                    channel_map['WMH'] = utils.map_channels(
+                        channels['WMH'],
+                        total_modalities,
+                        rand_assign=rand_assign_channels,
+                    )
+
+                    if single_slot:
+                        input_data, _ = utils.single_slot(val_data[0])
+                    else:
+                        input_data = torch.from_numpy(
+                            np.zeros(
+                                (
+                                    1,
+                                    len(total_modalities),
+                                    val_data[0].shape[2],
+                                    val_data[0].shape[3],
+                                    val_data[0].shape[4],
+                                ),
+                                dtype=np.float32,
+                            )
+                        )
+                        if domain_invariant_slot:
+                            input_data[:, channel_map["WMH"], :, :, :] = val_data[0]
+                        else:
+                            input_data[:, channel_map["WMH"], :, :, :] = val_data[0]
+
+                    input_data = input_data.to(device)
+                    label = val_data[1].to(device)
+                    roi_size = (
+                        cropped_input_size[0],
+                        cropped_input_size[1],
+                        cropped_input_size[2],
+                    )
+                    sw_batch_size = 1
+                    val_outputs = sliding_window_inference(
+                        input_data, roi_size, sw_batch_size, model
+                    )
+                    val_outputs = [
+                        post_trans(i) for i in decollate_batch(val_outputs)
+                    ]
+                    dice_metric(y_pred=val_outputs, y=label)
+                    sensitivity_metric(y_pred=val_outputs, y=label)
+                    precision_metric(y_pred=val_outputs, y=label)
+                    IOU_metric(y_pred=val_outputs, y=label)
+                metric["WMH"] = {
+                    "dice": dice_metric.aggregate().item(),
+                    "sensitivity": sensitivity_metric.aggregate()[0].item(),
+                    "precision": precision_metric.aggregate()[0].item(),
+                    "IOU": IOU_metric.aggregate().item(),
+                }
+                dice_metric.reset()
+                sensitivity_metric.reset()
+                precision_metric.reset()
+                IOU_metric.reset()
+                if metric["WMH"]["dice"] > best_metric.get("WMH", -1):
+                    best_metric["WMH"] = metric["WMH"]["dice"]
+                    best_metric_epoch["WMH"] = epoch + 1
+                    model_save_best_name = (
+                        model_save_path
+                        + train_config.project_name
+                        + "_random_drop_"
+                        + str(randomly_drop)
+                        + "_"
+                        + date
+                        + "_BEST_WMH.pth"
+                    )
+                    torch.save(model.state_dict(), model_save_best_name)
+                    print("saved new best metric model for WMH")
+                print(
+                    "current epoch: {} current mean dice WMH: {:.4f} best mean dice WMH: {:.4f} at epoch {}".format(
+                        epoch + 1,
+                        metric["WMH"]["dice"],
+                        best_metric["WMH"],
+                        best_metric_epoch["WMH"],
+                    )
+                )
+                total_av_dice.append(metric["WMH"]["dice"])
+                if wandb_active:
+                    wandb.log(
+                        {
+                            "epoch_val": epoch + 1,
+                            "mdice_ WMH": metric["WMH"]["dice"],
+
+                        }
+                    )
+                ##########################################
+                
                 for dataset in datasetlist:
                     metric[dataset] = {}
                     loader_index = data_loader_map[dataset]
@@ -663,6 +761,7 @@ def main (args,k_fold=None):
                 
 if __name__ == "__main__":
 
+
     # command line argument
     parser = argparse.ArgumentParser()
     parser.add_argument("--device_id", help="ID of the GPU", type=int, default=0)
@@ -676,9 +775,15 @@ if __name__ == "__main__":
     #########################
     args = parser.parse_args()
     args.device_id = 0
-    args.datasets = "ISLES"
+    args.datasets = 'MSSEG_TBI_BRATS_ISLES_ATLAS'
   
     ######################################
 
+    train_config = config.Training_config()
+    database_config = config.Database_config()
+    channels_copy = copy.deepcopy(database_config.channels)
 
-    main(args = args)
+    
+    main(train_config, database_config,k_fold=None,args = args,channels_copy = channels_copy)
+ 
+
