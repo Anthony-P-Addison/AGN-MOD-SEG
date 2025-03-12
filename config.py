@@ -7,9 +7,10 @@ class Training_config():
     workers:int = 4 # numworker
     train_batch_size: int = 2
     val_interval:int = 4 # the number of epochs between the validation   # 4 
+    lr_sched: bool = False
     lr:float = 1e-3           
     model_type:str = "UNET"  # default model type unet
-    cropped_input_size:tuple = (112,112,112)  # (128, 128, 128)  # (128, 128, 128)
+    cropped_input_size:tuple = (128,128,128)  # (128, 128, 128)  # (128, 128, 128)
     # lr_config
     drop_learning_rate:bool = True
     drop_learning_rate_epoch:int = 150 # epoch at which to decrease the learning rate
@@ -19,15 +20,19 @@ class Training_config():
     load_model_path:Path =  'models/Mixup/_model_remove:_None/MSSEG_TBI_BRATS_WMH_ATLAS/2025-02-21_23-40/Mixup_random_drop_True_2025-02-21_23-40_Epoch_149.pth'   ##"models/modality_invariant_slot/WMH_MSSEG/modality_invariant_slot_random_drop_1WMH_MSSEG_TOTAL_AVERAGE.pth"  # path to model .pt file
     
     random_drop:int = 1  # 1 for to be dropped and 0 for not to be dropped. 
-    # slot allocation
-    mixup :bool = True
+
+    ######### slot allocation #############
+
+    mixup :bool = False
+    gin_mix = False
+    gin_ipa: str = 'GIN_IPA'   # gin
     rand_assign_channels:bool = False
     domain_invariant_slot:bool = True
     Two_domain_invariant_slot:bool = False     # TODO: see if the presence of an extra slot can help training
     single_slot:bool = False
-    modality_remove: str = 'FLAIR' #'T1' #None    # the modality to be removed (useful for testing invariant slot on this modality). None if no modality to be dropped 
-    #admin
-    project_name:str = "Mixup"   # wandb project name:   # all_in_one   # shuffle_slots  # modality_invariant_slot  # Mixup
+    modality_remove: str = None #'T1' #None    # the modality to be removed (useful for testing invariant slot on this modality). None if no modality to be dropped 
+    #### admin  ####
+    project_name:str = "modality_invariant_slot"   # wandb project name:   # all_in_one   # shuffle_slots  # modality_invariant_slot  # Mixup
     model_save_path:str = "models/" + project_name + "/_model_remove:_" + str(modality_remove) + "/" # path to save the model
 
 
@@ -55,10 +60,10 @@ class Database_config():
     # training set size
     train_size["BRATS"] = 444 
     train_size["ATLAS"] = 459
-    train_size["MSSEG"] = 37 
+    train_size["MSSEG"] = 37   # 37 
     train_size["ISLES"] =19   #19   # 19 
     train_size["WMH"] = 42
-    train_size["TBI"] = 156
+    train_size["TBI"] = 156   #156
     train_size["VOETS2"] = 3
     train_size["ISLES_2022"] = 0   #1
     train_size["TUMOUR2"] = 41  
@@ -136,7 +141,7 @@ class Test_config():
 
 
 class Finetune_config:
-    # simialr to training
+    # similar to training
     epoch:int = 600
     workers:int = 2
     train_batch_size:int = 2
@@ -155,5 +160,8 @@ class Finetune_config:
     add_slot_to_pre_trained_model:bool = False  # if true will add slot to pre-train model
     new_mod_finetune:str = None  #"DWI"   # for randomly initiating a new slot
     add_invar_channel: bool = True
+
+
+
 
 

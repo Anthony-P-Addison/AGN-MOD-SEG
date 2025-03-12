@@ -7,7 +7,7 @@ import copy
 
 ####### k_fold cross validation #######
 
-# create funciton which goes into dataset of argsdatsaet and return a dictionary of 3 plits of the data
+# create function which goes into dataset of argsdatsaet and return a dictionary of 3 splits of the data
 
 def split_dataset(dataset_size, k_fold=int):
     indices = np.arange(dataset_size)
@@ -40,14 +40,13 @@ parser.add_argument(
 
 #########################
 args = parser.parse_args()
-args.device_id = 1
+args.device_id = 0
 args.datasets = "TBI"
-args.k_fold = 4
+args.k_fold = 5
 
 ######################################
 
 total_size = Database_config.total_size[args.datasets]
-
 
 split_datasets = split_dataset(total_size, args.k_fold)
 
@@ -57,20 +56,11 @@ channels_copy = copy.deepcopy(database_config.channels)
 
 
 
-split = split_datasets[-1]
-main(train_config,database_config,split,args,channels_copy)
+
+for i, split in enumerate(split_datasets):
+
+    main(train_config,database_config,split,args,channels_copy)
 
 
-
-
-
-# for i, split in enumerate(split_datasets):
-
-#     main(train_config,database_config,split,args,channels_copy)
-
-
-
-
-  
 
 #TODO: fors isles try a batch size of 8/10 and  try a slightly smaller max learning rate. 

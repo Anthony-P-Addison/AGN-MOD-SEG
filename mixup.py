@@ -7,7 +7,6 @@ import numpy as np
 
 
 
-
 def mixup_data(x:torch.tensor, alpha=2):
     """Returns mixed inputs, pairs of targets, and lambda"""
     if alpha > 0:

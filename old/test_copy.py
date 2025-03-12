@@ -13,7 +13,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 from tabulate import tabulate
-from plots_graphs import bar_plot_1
+from old.plots_graphs import bar_plot_1
 from nets.unet import Unet
 
 

@@ -7,7 +7,7 @@ from monai.metrics import DiceMetric, ConfusionMatrixMetric, MeanIoU
 from monai.transforms import Activations, AsDiscrete, Compose
 from monai.losses.dice import DiceLoss
 from nets.unet import res_unet as Unet
-from nets.invariant_channel import CustomUNet
+from nets.invariant_channelqq import CustomUNet
 import numpy as np
 import utils
 import wandb
@@ -36,22 +36,15 @@ def main (train_config,database_config,k_fold,args,channels_copy):
     single_slot = train_config.single_slot
     wandb_active = train_config.wandb_active
     mixup = train_config.mixup
+    gin_mix = train_config.gin_mix
+    lr_sched = train_config.lr_sched
    
    
-
     if randomly_drop and single_slot:
         raise ValueError("Cannot have both random drop and single slot")
     
 
-    # Save the configuration classes to a JSON file
-    # train_config_dict = train_config.__dict__
-    # database_config_dict = database_config.__dict__
-    # model_save_path = 'experiment/'
-    # config_save_path = os.path.join(model_save_path, "config.json")
-    # with open(config_save_path, 'w') as config_file:
-    #     json.dump({
-    #         # "train_config": train_config_dict,
-    #         "database_config": database_config_dict,
+    # Save the configuration classes to a JSON modality_remove
     #         "test_config": test_config.model_dump()
     #     }, config_file, indent=4)
     # print(f"Configuration saved to {config_save_path}")
@@ -143,13 +136,13 @@ def main (train_config,database_config,k_fold,args,channels_copy):
     # load data    
     train_loaders,val_loader,data_loader_map = get_dataloader(train_config, database_config,datasetlist, cropped_input_size , data_size,channels_copy,k_fold)
     # print('load WMH only for validation:')
-    ISLES_loader,WMH_val_loader,data_laod = get_dataloader(train_config, database_config,["WMH"], cropped_input_size , data_size,channels_copy,k_fold)
+    ISLES_loader,ISLES_val_loader,data_laod = get_dataloader(train_config, database_config,["ISLES"], cropped_input_size , data_size,channels_copy,k_fold)
     # initialize GPU
     print("Running on GPU:" + str(args.device_id))
     print("Running for epochs:" + str(epochs))
     cuda_id = "cuda:" + str(args.device_id)
     device = torch.device(cuda_id)
-    #torch.cuda.set_device(cuda_id)
+    torch.cuda.set_device(cuda_id)
 
     # initialize metrics
     dice_metric = DiceMetric(
@@ -182,7 +175,7 @@ def main (train_config,database_config,k_fold,args,channels_copy):
             in_channel = len(total_modalities)
 
         
-        model = CustomUNet(in_channels=in_channel).to(device)
+        model = Unet(in_channels=in_channel).to(device)
         #model = (Unet(in_channels=in_channel).to(device))
 
         
@@ -192,7 +185,7 @@ def main (train_config,database_config,k_fold,args,channels_copy):
 
 
 
-       
+
         optimizer = torch.optim.Adam(model.parameters(), lr=train_config.lr)
         epoched = 0
 
@@ -232,16 +225,24 @@ def main (train_config,database_config,k_fold,args,channels_copy):
 
     ### for isles training ####
 
-    # def lr_lambda(current_epoch):
-    #     # warm up the learning rate.
-    #     if current_epoch < 50:
-    #         return (float(current_epoch) + 1) / float(max(1, 50))
-    #     elif 50 <= current_epoch <= 250:
-    #         return 1.0
-    #     else:
-    #         return max(0.0, 1.0 - (current_epoch - 100) / float(max(1, epochs - 250)))
-    #         #return max(0.0, 0.5 * (1.0 + math.cos(math.pi * (current_epoch - warmup_epochs) / max(1, args.E - warmup_epochs))))
-    # scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
+    if lr_sched:
+
+        def lr_lambda(current_epoch):
+            # warm up the learning rate.
+            if current_epoch < 50:
+                return (float(current_epoch) + 1) / float(max(1, 50))
+            elif 50 <= current_epoch <= 250:
+                return 1.0
+            elif 250 < current_epoch <= 350:
+                return 0.7
+            elif 350 < current_epoch <= 450:
+                return 0.4
+            elif 450 < current_epoch <= 550:
+                return 0.2
+            else:
+                return max(0.0, 0.2 - ((current_epoch - 550) / float(max(1, epochs - 550)))/5)
+                #return max(0.0, 0.5 * (1.0 + math.cos(math.pi * (current_epoch - warmup_epochs) / max(1, args.E - warmup_epochs))))
+        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
     
     ##training##
 
@@ -255,12 +256,13 @@ def main (train_config,database_config,k_fold,args,channels_copy):
 
 
         # #drop learning rate
-        if (
-            train_config.drop_learning_rate
-            and epoch >= train_config.drop_learning_rate_epoch
-        ):
-            for g in optimizer.param_groups:
-                g["lr"] = train_config.drop_learning_rate_value
+        if not lr_sched:
+            if (
+                train_config.drop_learning_rate
+                and epoch >= train_config.drop_learning_rate_epoch
+            ):
+                for g in optimizer.param_groups:
+                    g["lr"] = train_config.drop_learning_rate_value
 
         for batch_data in zip(*train_loaders):
             
@@ -278,7 +280,7 @@ def main (train_config,database_config,k_fold,args,channels_copy):
                     if randomly_drop:
                         modalities_remaining, batch[img_index] = (
                             utils.rand_set_channels_to_zero_with_invar(
-                                channels["BRATS"], batch[img_index],domain_invariant=domain_invariant_slot,mixup =mixup,batch_label_data=batch[label_index]
+                                channels["BRATS"], batch[img_index],domain_invariant=domain_invariant_slot,mixup =mixup,gin_mix = gin_mix, batch_label_data=batch[label_index],device_id = args.device_id,gin_ipa=train_config.gin_ipa
                             )
                         )
                         for i in range(batch[label_index].shape[0]):
@@ -348,7 +350,7 @@ def main (train_config,database_config,k_fold,args,channels_copy):
                         if randomly_drop:
                             modalities_remaining, batch[img_index] = (
                                 utils.rand_set_channels_to_zero_with_invar(
-                                    channels["TBI"], batch[img_index],domain_invariant=domain_invariant_slot,mixup = mixup,batch_label_data=batch[label_index]
+                                    channels["TBI"], batch[img_index],domain_invariant=domain_invariant_slot,mixup = mixup,gin_mix = gin_mix, batch_label_data=batch[label_index], device_id= args.device_id,gin_ipa=train_config.gin_ipa
                                 )
                         )
                         # this part is only relevant for TBI when doing multi channel segmentation with modality drop 
@@ -429,7 +431,7 @@ def main (train_config,database_config,k_fold,args,channels_copy):
                     else:
                         if randomly_drop:
                             _, batch[img_index] = utils.rand_set_channels_to_zero_with_invar(
-                                channels[dataset], batch[img_index],domain_invariant=domain_invariant_slot,mixup = mixup, batch_label_data = batch[label_index]
+                                channels[dataset], batch[img_index],domain_invariant=domain_invariant_slot,mixup = mixup, gin_mix = gin_mix, batch_label_data = batch[label_index],device_id =args.device_id,gin_ipa=train_config.gin_ipa
                             )  # ATLAS WILL ALWAYS BE ONE CHANNEL (no drop)
                         
                         input_data = torch.from_numpy(
@@ -470,7 +472,8 @@ def main (train_config,database_config,k_fold,args,channels_copy):
             if wandb_active:
                 wandb.log({"loss": loss.item(), "epoch": epoch + 1,"lr": optimizer.param_groups[0]["lr"]})
           
-        # scheduler.step()
+        if lr_sched:
+            scheduler.step()
         epoch_loss /= step
         print(f"epoch {epoch + 1} average loss: {epoch_loss:.4f}")
         print("\n------------------------\n")
@@ -534,12 +537,12 @@ def main (train_config,database_config,k_fold,args,channels_copy):
                 ################ I want to test isles as I go along to see how it does #######################
                 
                 
-                for val_data in WMH_val_loader["WMH"]:
+                for val_data in ISLES_val_loader["ISLES"]:
                     
-                    channels['WMH'] = [x if x != 'FLAIR' else 'invar' for x in channels['WMH']]
+                    channels['ISLES'] = [x if x != 'DWI' else 'invar' for x in channels['ISLES']]
                      
-                    channel_map['WMH'] = utils.map_channels(
-                        channels['WMH'],
+                    channel_map['ISLES'] = utils.map_channels(
+                        channels['ISLES'],
                         total_modalities,
                         rand_assign=rand_assign_channels,
                     )
@@ -560,9 +563,9 @@ def main (train_config,database_config,k_fold,args,channels_copy):
                             )
                         )
                         if domain_invariant_slot:
-                            input_data[:, channel_map["WMH"], :, :, :] = val_data[0]
+                            input_data[:, channel_map["ISLES"], :, :, :] = val_data[0]
                         else:
-                            input_data[:, channel_map["WMH"], :, :, :] = val_data[0]
+                            input_data[:, channel_map["ISLES"], :, :, :] = val_data[0]
 
                     input_data = input_data.to(device)
                     label = val_data[1].to(device)
@@ -582,7 +585,7 @@ def main (train_config,database_config,k_fold,args,channels_copy):
                     sensitivity_metric(y_pred=val_outputs, y=label)
                     precision_metric(y_pred=val_outputs, y=label)
                     IOU_metric(y_pred=val_outputs, y=label)
-                metric["WMH"] = {
+                metric["ISLES"] = {
                     "dice": dice_metric.aggregate().item(),
                     "sensitivity": sensitivity_metric.aggregate()[0].item(),
                     "precision": precision_metric.aggregate()[0].item(),
@@ -592,34 +595,23 @@ def main (train_config,database_config,k_fold,args,channels_copy):
                 sensitivity_metric.reset()
                 precision_metric.reset()
                 IOU_metric.reset()
-                if metric["WMH"]["dice"] > best_metric.get("WMH", -1):
-                    best_metric["WMH"] = metric["WMH"]["dice"]
-                    best_metric_epoch["WMH"] = epoch + 1
-                    model_save_best_name = (
-                        model_save_path
-                        + train_config.project_name
-                        + "_random_drop_"
-                        + str(randomly_drop)
-                        + "_"
-                        + date
-                        + "_BEST_WMH.pth"
-                    )
-                    torch.save(model.state_dict(), model_save_best_name)
-                    print("saved new best metric model for WMH")
+                if metric["ISLES"]["dice"] > best_metric.get("ISLES", -1):
+                    best_metric["ISLES"] = metric["ISLES"]["dice"]
+                    best_metric_epoch["ISLES"] = epoch + 1
                 print(
-                    "current epoch: {} current mean dice WMH: {:.4f} best mean dice WMH: {:.4f} at epoch {}".format(
+                    "current epoch: {} current mean dice ISLES: {:.4f} best mean dice ISLES: {:.4f} at epoch {}".format(
                         epoch + 1,
-                        metric["WMH"]["dice"],
-                        best_metric["WMH"],
-                        best_metric_epoch["WMH"],
+                        metric["ISLES"]["dice"],
+                        best_metric["ISLES"],
+                        best_metric_epoch["ISLES"],
                     )
                 )
-                total_av_dice.append(metric["WMH"]["dice"])
+                total_av_dice.append(metric["ISLES"]["dice"])
                 if wandb_active:
                     wandb.log(
                         {
                             "epoch_val": epoch + 1,
-                            "mdice_ WMH": metric["WMH"]["dice"],
+                            "mdice_ISLES": metric["ISLES"]["dice"],
 
                         }
                     )
@@ -775,7 +767,7 @@ if __name__ == "__main__":
     #########################
     args = parser.parse_args()
     args.device_id = 0
-    args.datasets = 'MSSEG_TBI_BRATS_ISLES_ATLAS'
+    args.datasets = 'MSSEG_TBI_BRATS_WMH_ATLAS'
   
     ######################################
 
@@ -783,7 +775,12 @@ if __name__ == "__main__":
     database_config = config.Database_config()
     channels_copy = copy.deepcopy(database_config.channels)
 
-    
+    #modality_remove = ['T2','T1c','FLAIR']
+
+    # for modality in modality_remove:
+
+    #     train_config.modality_remove = modality
+
     main(train_config, database_config,k_fold=None,args = args,channels_copy = channels_copy)
  
 

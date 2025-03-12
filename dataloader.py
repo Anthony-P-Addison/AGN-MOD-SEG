@@ -34,15 +34,6 @@ class RemoveChannels(Transform):
 
 
 
-# Function to calculate the mean of an image
-
-def compute_image_mean(img):
-
-    return img.mean()
-
-
-
-
 def create_dataloader(
     val_size: int,
     images: list[Path],
@@ -111,8 +102,6 @@ def create_dataloader(
     val_segtrans = Compose([EnsureChannelFirst()])
     # create a training data loader
     
-    ############# Calculate the mean of each individual image before being cropped #######################
-  
 
     train_ds = ImageDataset(train_images, train_segs, transform=train_imtrans, seg_transform=seg_imtrans)
     ######################################################
@@ -129,15 +118,6 @@ def create_dataloader(
     )
     val_loader = DataLoader(val_ds, batch_size=1, num_workers=workers, pin_memory=0)
 
-    ################# Attach the original means to the dataloaders ############################
-
-    # Calculate the mean of each individual image before being cropped
-    
-    
-
-    # Create a training data loader with original means
-    train_ds = ImageDataset(train_images, train_segs, transform=train_imtrans, seg_transform=seg_imtrans)
-  
     # Create a custom dataset class to include the mean
     # class CustomImageDataset(ImageDataset):
     #     def __init__(self, *args, means, **kwargs):
@@ -150,18 +130,7 @@ def create_dataloader(
     #         return data[0], data[1], mean
 
     # Create a training data loader with original means
-    
-    train_loader = DataLoader(train_ds, batch_size=train_batch_size, shuffle=True, num_workers=workers, pin_memory=0)
 
-    # Create a validation data loader with original means
-    val_ds = ImageDataset(
-        val_images,
-        val_segs,
-        transform=val_imtrans,
-        seg_transform=val_segtrans,
-        image_only=image_only,
-    )
-    val_loader = DataLoader(val_ds, batch_size=1, num_workers=workers, pin_memory=0)
 
     # Attach the original means to the dataloaders
     
@@ -279,6 +248,10 @@ def create_test_val_loader(
 
 
 ########################################################################
+
+
+
+
 
 
 if "__main__" == __name__:

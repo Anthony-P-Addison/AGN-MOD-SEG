@@ -69,7 +69,8 @@ class CustomUNet(nn.Module):
         invariant_features_5 = self.invar5(invariant_features_4)
 
         # Process the other channels
-        x = torch.cat([x[:, :self.invariant_channel_index, :, :, :], x[:, self.invariant_channel_index + 1:, :, :, :]], dim=1)
+        
+        #x = torch.cat([x[:, :self.invariant_channel_index, :, :, :], x[:, self.invariant_channel_index + 1:, :, :, :]], dim=1)
         conv_out_1 = self.conv_1(x)
         conv_out_2 = self.conv_2(conv_out_1)
         conv_out_3 = self.conv_3(conv_out_2)
@@ -104,11 +105,11 @@ class CustomUNet(nn.Module):
         # combined_features_5 = torch.cat((conv_out_5, invariant_features_5), dim=1)
 
         # Combine the invariant features with the main path features at each layer
-        combined_features_1 = conv_out_1_att + invariant_features_1_att
-        combined_features_2 = conv_out_2_att + invariant_features_2_att
-        combined_features_3 = conv_out_3_att + invariant_features_3_att
-        combined_features_4 = conv_out_4_att + invariant_features_4_att
-        combined_features_5 = conv_out_5_att + invariant_features_5_att
+        combined_features_1 = (conv_out_1*conv_out_1_att) + (invariant_features_1*invariant_features_1_att)
+        combined_features_2 = (conv_out_2*conv_out_2_att) + (invariant_features_2*invariant_features_2_att)
+        combined_features_3 = (conv_out_3* conv_out_3_att) + (invariant_features_3*invariant_features_3_att)
+        combined_features_4 = (conv_out_4* conv_out_4_att) + (invariant_features_4*invariant_features_4_att)
+        combined_features_5 = (conv_out_5*conv_out_5_att) + (invariant_features_5*invariant_features_5_att)
 
         # Upsample and concatenate with downsampled invariant features for skip connections
         up_in_1 = torch.cat((combined_features_5, combined_features_4), dim=1)
