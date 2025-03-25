@@ -136,7 +136,7 @@ def main (train_config,database_config,k_fold,args,channels_copy):
     # load data    
     train_loaders,val_loader,data_loader_map = get_dataloader(train_config, database_config,datasetlist, cropped_input_size , data_size,channels_copy,k_fold)
     # print('load WMH only for validation:')
-    ISLES_loader,ISLES_val_loader,data_laod = get_dataloader(train_config, database_config,["ISLES"], cropped_input_size , data_size,channels_copy,k_fold)
+    #ISLES_loader,ISLES_val_loader,data_laod = get_dataloader(train_config, database_config,["ISLES"], cropped_input_size , data_size,channels_copy,k_fold)
     # initialize GPU
     print("Running on GPU:" + str(args.device_id))
     print("Running for epochs:" + str(epochs))
@@ -537,84 +537,84 @@ def main (train_config,database_config,k_fold,args,channels_copy):
                 ################ I want to test isles as I go along to see how it does #######################
                 
                 
-                for val_data in ISLES_val_loader["ISLES"]:
+                # for val_data in ISLES_val_loader["ISLES"]:
                     
-                    channels['ISLES'] = [x if x != 'DWI' else 'invar' for x in channels['ISLES']]
+                #     channels['ISLES'] = [x if x != 'DWI' else 'invar' for x in channels['ISLES']]
                      
-                    channel_map['ISLES'] = utils.map_channels(
-                        channels['ISLES'],
-                        total_modalities,
-                        rand_assign=rand_assign_channels,
-                    )
+                #     channel_map['ISLES'] = utils.map_channels(
+                #         channels['ISLES'],
+                #         total_modalities,
+                #         rand_assign=rand_assign_channels,
+                #     )
 
-                    if single_slot:
-                        input_data, _ = utils.single_slot(val_data[0])
-                    else:
-                        input_data = torch.from_numpy(
-                            np.zeros(
-                                (
-                                    1,
-                                    len(total_modalities),
-                                    val_data[0].shape[2],
-                                    val_data[0].shape[3],
-                                    val_data[0].shape[4],
-                                ),
-                                dtype=np.float32,
-                            )
-                        )
-                        if domain_invariant_slot:
-                            input_data[:, channel_map["ISLES"], :, :, :] = val_data[0]
-                        else:
-                            input_data[:, channel_map["ISLES"], :, :, :] = val_data[0]
+                #     if single_slot:
+                #         input_data, _ = utils.single_slot(val_data[0])
+                #     else:
+                #         input_data = torch.from_numpy(
+                #             np.zeros(
+                #                 (
+                #                     1,
+                #                     len(total_modalities),
+                #                     val_data[0].shape[2],
+                #                     val_data[0].shape[3],
+                #                     val_data[0].shape[4],
+                #                 ),
+                #                 dtype=np.float32,
+                #             )
+                #         )
+                #         if domain_invariant_slot:
+                #             input_data[:, channel_map["ISLES"], :, :, :] = val_data[0]
+                #         else:
+                #             input_data[:, channel_map["ISLES"], :, :, :] = val_data[0]
 
-                    input_data = input_data.to(device)
-                    label = val_data[1].to(device)
-                    roi_size = (
-                        cropped_input_size[0],
-                        cropped_input_size[1],
-                        cropped_input_size[2],
-                    )
-                    sw_batch_size = 1
-                    val_outputs = sliding_window_inference(
-                        input_data, roi_size, sw_batch_size, model
-                    )
-                    val_outputs = [
-                        post_trans(i) for i in decollate_batch(val_outputs)
-                    ]
-                    dice_metric(y_pred=val_outputs, y=label)
-                    sensitivity_metric(y_pred=val_outputs, y=label)
-                    precision_metric(y_pred=val_outputs, y=label)
-                    IOU_metric(y_pred=val_outputs, y=label)
-                metric["ISLES"] = {
-                    "dice": dice_metric.aggregate().item(),
-                    "sensitivity": sensitivity_metric.aggregate()[0].item(),
-                    "precision": precision_metric.aggregate()[0].item(),
-                    "IOU": IOU_metric.aggregate().item(),
-                }
-                dice_metric.reset()
-                sensitivity_metric.reset()
-                precision_metric.reset()
-                IOU_metric.reset()
-                if metric["ISLES"]["dice"] > best_metric.get("ISLES", -1):
-                    best_metric["ISLES"] = metric["ISLES"]["dice"]
-                    best_metric_epoch["ISLES"] = epoch + 1
-                print(
-                    "current epoch: {} current mean dice ISLES: {:.4f} best mean dice ISLES: {:.4f} at epoch {}".format(
-                        epoch + 1,
-                        metric["ISLES"]["dice"],
-                        best_metric["ISLES"],
-                        best_metric_epoch["ISLES"],
-                    )
-                )
-                total_av_dice.append(metric["ISLES"]["dice"])
-                if wandb_active:
-                    wandb.log(
-                        {
-                            "epoch_val": epoch + 1,
-                            "mdice_ISLES": metric["ISLES"]["dice"],
+                #     input_data = input_data.to(device)
+                #     label = val_data[1].to(device)
+                #     roi_size = (
+                #         cropped_input_size[0],
+                #         cropped_input_size[1],
+                #         cropped_input_size[2],
+                #     )
+                #     sw_batch_size = 1
+                #     val_outputs = sliding_window_inference(
+                #         input_data, roi_size, sw_batch_size, model
+                #     )
+                #     val_outputs = [
+                #         post_trans(i) for i in decollate_batch(val_outputs)
+                #     ]
+                #     dice_metric(y_pred=val_outputs, y=label)
+                #     sensitivity_metric(y_pred=val_outputs, y=label)
+                #     precision_metric(y_pred=val_outputs, y=label)
+                #     IOU_metric(y_pred=val_outputs, y=label)
+                # metric["ISLES"] = {
+                #     "dice": dice_metric.aggregate().item(),
+                #     "sensitivity": sensitivity_metric.aggregate()[0].item(),
+                #     "precision": precision_metric.aggregate()[0].item(),
+                #     "IOU": IOU_metric.aggregate().item(),
+                # }
+                # dice_metric.reset()
+                # sensitivity_metric.reset()
+                # precision_metric.reset()
+                # IOU_metric.reset()
+                # if metric["ISLES"]["dice"] > best_metric.get("ISLES", -1):
+                #     best_metric["ISLES"] = metric["ISLES"]["dice"]
+                #     best_metric_epoch["ISLES"] = epoch + 1
+                # print(
+                #     "current epoch: {} current mean dice ISLES: {:.4f} best mean dice ISLES: {:.4f} at epoch {}".format(
+                #         epoch + 1,
+                #         metric["ISLES"]["dice"],
+                #         best_metric["ISLES"],
+                #         best_metric_epoch["ISLES"],
+                #     )
+                # )
+                # total_av_dice.append(metric["ISLES"]["dice"])
+                # if wandb_active:
+                #     wandb.log(
+                #         {
+                #             "epoch_val": epoch + 1,
+                #             "mdice_ISLES": metric["ISLES"]["dice"],
 
-                        }
-                    )
+                #         }
+                #     )
                 ##########################################
                 
                 for dataset in datasetlist:
@@ -767,7 +767,7 @@ if __name__ == "__main__":
     #########################
     args = parser.parse_args()
     args.device_id = 0
-    args.datasets = 'MSSEG_TBI_BRATS_WMH_ATLAS'
+    args.datasets = 'WMH'
   
     ######################################
 

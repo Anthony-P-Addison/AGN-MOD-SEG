@@ -5,8 +5,8 @@ from monai.data import decollate_batch
 from monai.inferers import sliding_window_inference
 from monai.metrics import DiceMetric, ConfusionMatrixMetric, MeanIoU
 from monai.transforms import Activations, AsDiscrete, Compose
-#from nets.unet import res_unet as Unet   
-from nets.invariant_channel import CustomUNet as Unet
+from nets.unet import res_unet as Unet   
+#from nets.invariant_channel import CustomUNet as Unet
 import numpy as np
 import utils
 import config
@@ -252,45 +252,14 @@ if __name__ == "__main__":
 
     ####################
 
-    args.datasets_to_test = 'ISLES' #'TBI' # dataset for testing
-    args.modalities_to_test ="0_1_2_3"       # numeric order of modalities
+    args.datasets_to_test = 'WMH' #'TBI' # dataset for testing
+    args.modalities_to_test ="0_1"       # numeric order of modalities
     args.test_all_combinations = 1
     args.device_id = 0
-    args.trained_on = 'WMH_ATLAS_BRATS_TBI_MSSEG'    # The datasets the model was trained on
+    args.trained_on = 'WMH_MSSEG_BRATS_ATLAS_TBI'    # The datasets the model was trained on
     #########################
 
-
-    checkpoint=['/home/magd6292/Documents/wentian_clone/MultiUnet/models/Mixup/_model_remove:_None/WMH_MSSEG_BRATS_ATLAS_TBI/2025-01-31_00-27/Mixup_random_drop_True_2025-01-31_00-27_Epoch_49.pth',
-    '/home/magd6292/Documents/wentian_clone/MultiUnet/models/Mixup/_model_remove:_None/WMH_MSSEG_BRATS_ATLAS_TBI/2025-01-31_00-27/Mixup_random_drop_True_2025-01-31_00-27_Epoch_99.pth',
-    '/home/magd6292/Documents/wentian_clone/MultiUnet/models/Mixup/_model_remove:_None/WMH_MSSEG_BRATS_ATLAS_TBI/2025-01-31_00-27/Mixup_random_drop_True_2025-01-31_00-27_Epoch_149.pth',
-    '/home/magd6292/Documents/wentian_clone/MultiUnet/models/Mixup/_model_remove:_None/WMH_MSSEG_BRATS_ATLAS_TBI/2025-01-31_00-27/Mixup_random_drop_True_2025-01-31_00-27_Epoch_199.pth',
-    '/home/magd6292/Documents/wentian_clone/MultiUnet/models/Mixup/_model_remove:_None/WMH_MSSEG_BRATS_ATLAS_TBI/2025-01-31_00-27/Mixup_random_drop_True_2025-01-31_00-27_Epoch_249.pth',
-    '/home/magd6292/Documents/wentian_clone/MultiUnet/models/Mixup/_model_remove:_None/WMH_MSSEG_BRATS_ATLAS_TBI/2025-01-31_00-27/Mixup_random_drop_True_2025-01-31_00-27_Epoch_299.pth',
-    '/home/magd6292/Documents/wentian_clone/MultiUnet/models/Mixup/_model_remove:_None/WMH_MSSEG_BRATS_ATLAS_TBI/2025-01-31_00-27/Mixup_random_drop_True_2025-01-31_00-27_Epoch_349.pth',
-    '/home/magd6292/Documents/wentian_clone/MultiUnet/models/Mixup/_model_remove:_None/WMH_MSSEG_BRATS_ATLAS_TBI/2025-01-31_00-27/Mixup_random_drop_True_2025-01-31_00-27_Epoch_399.pth',
-    '/home/magd6292/Documents/wentian_clone/MultiUnet/models/Mixup/_model_remove:_None/WMH_MSSEG_BRATS_ATLAS_TBI/2025-01-31_00-27/Mixup_random_drop_True_2025-01-31_00-27_Epoch_449.pth',
-    '/home/magd6292/Documents/wentian_clone/MultiUnet/models/Mixup/_model_remove:_None/WMH_MSSEG_BRATS_ATLAS_TBI/2025-01-31_00-27/Mixup_random_drop_True_2025-01-31_00-27_Epoch_499.pth',
-    '/home/magd6292/Documents/wentian_clone/MultiUnet/models/Mixup/_model_remove:_None/WMH_MSSEG_BRATS_ATLAS_TBI/2025-01-31_00-27/Mixup_random_drop_True_2025-01-31_00-27_Epoch_549.pth',
-    '/home/magd6292/Documents/wentian_clone/MultiUnet/models/Mixup/_model_remove:_None/WMH_MSSEG_BRATS_ATLAS_TBI/2025-01-31_00-27/Mixup_random_drop_True_2025-01-31_00-27_Epoch_599.pth']
-
-
-    
-    #checkpoint1 = [
-        # # 'models/standard/new_test_BRATS_ATLAS_WMH_MSSEG_TBI_random_drop_0_Epoch_49.pth',
-        # # 'models/standard/new_test_BRATS_ATLAS_WMH_MSSEG_TBI_random_drop_0_Epoch_99.pth',
-        # 'models/standard/new_test_BRATS_ATLAS_WMH_MSSEG_TBI_random_drop_0_Epoch_149.pth',
-        # 'models/standard/new_test_BRATS_ATLAS_WMH_MSSEG_TBI_random_drop_0_Epoch_199.pth',
-        # 'models/standard/new_test_BRATS_ATLAS_WMH_MSSEG_TBI_random_drop_0_Epoch_249.pth',
-        # 'models/standard/new_test_BRATS_ATLAS_WMH_MSSEG_TBI_random_drop_0_Epoch_299.pth',
-        # 'models/standard/new_test_BRATS_ATLAS_WMH_MSSEG_TBI_random_drop_0_Epoch_349.pth',
-        # 'models/standard/new_test_BRATS_ATLAS_WMH_MSSEG_TBI_random_drop_0_Epoch_399.pth',
-        # 'models/standard/new_test_BRATS_ATLAS_WMH_MSSEG_TBI_random_drop_0_Epoch_449.pth',
-        # 'models/standard/new_test_BRATS_ATLAS_WMH_MSSEG_TBI_random_drop_0_Epoch_499.pth',
-        #'models/standard/new_test_BRATS_ATLAS_WMH_MSSEG_TBI_random_drop_0_Epoch_549.pth',
-        # 'models/standard/new_test_BRATS_ATLAS_WMH_MSSEG_TBI_random_drop_0_Epoch_599.pth'
-    #]
-
-    checkpoint1 = ['models/Mixup/_model_remove:_None/MSSEG_TBI_BRATS_WMH_ATLAS/2025-02-24_02-16/Mixup_random_drop_True_2025-02-24_02-16_Epoch_99.pth']
+    checkpoint1 = ['models/all_in_one/WMH_MSSEG_BRATS_ATLAS_TBI/all_in_one_random_drop_1_2024-12-19_17-40_Epoch_599.pth']
     #['models/all_in_one/_model_remove:_None/TBI/2025-02-13_21-31/all_in_one_random_drop_False_2025-02-13_21-31_Epoch_599.pth']
 
 
