@@ -69,14 +69,15 @@ def create_dataloader(
         val_images = [images[i] for i in val_indices]
         val_segs = [segs[i] for i in val_indices]
 
-    else:
-        # standard set up from paper
+    elif k_fold is None:
         train_images = images[:-val_size]
         train_images = train_images * div + train_images[:rem]
         train_segs = segs[:-val_size]
         train_segs = train_segs * div + train_segs[:rem]
         val_images = images[-val_size:]
         val_segs = segs[-val_size:]
+
+
     # image augmentation through spatial cropping to size and by randomly rotating
 
     train_imtrans = Compose(
@@ -117,22 +118,6 @@ def create_dataloader(
         image_only=image_only,
     )
     val_loader = DataLoader(val_ds, batch_size=1, num_workers=workers, pin_memory=0)
-
-    # Create a custom dataset class to include the mean
-    # class CustomImageDataset(ImageDataset):
-    #     def __init__(self, *args, means, **kwargs):
-    #         super().__init__(*args, **kwargs)
-    #         self.means = means
-
-    #     def __getitem__(self, index):
-    #         data = super().__getitem__(index)
-    #         mean = self.means[index]
-    #         return data[0], data[1], mean
-
-    # Create a training data loader with original means
-
-
-    # Attach the original means to the dataloaders
     
     return train_loader, val_loader
 

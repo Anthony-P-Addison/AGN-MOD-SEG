@@ -10,10 +10,10 @@ class Training_config():
     lr_sched: bool = True
     lr:float = 1e-3           
     model_type:str = "UNET"  # default model type unet
-    cropped_input_size:tuple = (128,128,128)  # (128, 128, 128)  # (128, 128, 128)
+    cropped_input_size:tuple = (96,96,96)  # (128, 128, 128)  # (128, 128, 128)
     # lr_config
     drop_learning_rate:bool = True
-    drop_learning_rate_epoch:int = 150 # epoch at which to decrease the learning rate
+    drop_learning_rate_epoch:int = 150 # 150 # epoch at which to decrease the learning rate
     drop_learning_rate_value:float = 1e-4
     # pre trained model:
     load_pre_trained_model:bool = False  # if true will load pre-train model  
@@ -27,12 +27,12 @@ class Training_config():
     gin_mix = False
     gin_ipa: str = 'GIN_IPA'   # gin
     rand_assign_channels:bool = False
-    domain_invariant_slot:bool = True
+    domain_invariant_slot:bool = False
     Two_domain_invariant_slot:bool = False     # TODO: see if the presence of an extra slot can help training
     single_slot:bool = False
-    modality_remove: str = None #'T1' #None    # the modality to be removed (useful for testing invariant slot on this modality). None if no modality to be dropped 
+    modality_remove: str = 'ADC' #'T1' #None    # the modality to be removed (useful for testing invariant slot on this modality). None if no modality to be dropped 
     #### admin  ####
-    project_name:str = "modality_invariant_slot"   # wandb project name:   # all_in_one   # shuffle_slots  # modality_invariant_slot  # Mixup
+    project_name:str = "all_in_one"   # wandb project name:   # all_in_one   # shuffle_slots  # modality_invariant_slot  # Mixup
     model_save_path:str = "models/" + project_name + "/_model_remove:_" + str(modality_remove) + "/" # path to save the model
 
 
@@ -53,7 +53,7 @@ class Database_config():
     channels["WMH"] = ["FLAIR", "T1"]
     channels["VOETS2"] = ["FLAIR","T2","T1c"]
     channels["TBI"] = ["FLAIR", "T1", "T2", "SWI"]
-    channels["ISLES_2022"] = ['T1','FLAIR','T2'] # ["ADC","FLAIR","DWI"]  # ['T1','FLAIR','T2']
+    channels["ISLES2022"] = ['ADC','DWI','FLAIR'] 
     channels["TUMOUR2"]  = ['T1']
     train_size = {}
     # size for each database
@@ -65,7 +65,7 @@ class Database_config():
     train_size["WMH"] = 42
     train_size["TBI"] = 156   #156
     train_size["VOETS2"] = 3
-    train_size["ISLES_2022"] = 0   #1
+    train_size["ISLES2022"] = 175   
     train_size["TUMOUR2"] = 41  
     total_size = {}
     total_size["BRATS"] = 484
@@ -75,7 +75,7 @@ class Database_config():
     total_size["WMH"] = 60
     total_size["TBI"] = 281
     total_size["VOETS2"] = 7 
-    total_size["ISLES_2022"] = 1   
+    total_size["ISLES2022"] = 250   
     total_size["TUMOUR2"] = 51
     img_path = {}
     seg_path = {}
@@ -90,8 +90,8 @@ class Database_config():
         seg_path["BRATS"] = "data/BRATS/Labels"
     img_path["ATLAS"] = "data/ATLAS/Images"
     seg_path["ATLAS"] = "data/ATLAS/Labels"
-    img_path["ISLES_2022"] = "data/ISLES_2022/Images"
-    seg_path["ISLES_2022"] = "data/ISLES_2022/Labels"
+    img_path["ISLES2022"] = "data/ISLES_2022/Images"
+    seg_path["ISLES2022"] = "data/ISLES_2022/Labels"
     img_path["TUMOUR2"] = "data/TUMOUR2/Images"
     seg_path["TUMOUR2"] = "data/TUMOUR2/Labels"
 
@@ -117,7 +117,7 @@ class Database_config():
     val_size["WMH"] = 18
     val_size["TBI"] = 125
     val_size["VOETS2"] = 4
-    val_size["ISLES_2022"] = 11
+    val_size["ISLES2022"] = 75
     val_size["ISLES"] = 9   #28  #9
     val_size["TUMOUR2"] = 10
 

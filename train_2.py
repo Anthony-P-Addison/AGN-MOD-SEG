@@ -21,6 +21,7 @@ import random
 
 
 
+
 def main (train_config,database_config,k_fold,args,channels_copy):
 
 
@@ -174,16 +175,35 @@ def main (train_config,database_config,k_fold,args,channels_copy):
         else:
             in_channel = len(total_modalities)
 
-        
         model = Unet(in_channels=in_channel).to(device)
-        #model = (Unet(in_channels=in_channel).to(device))
 
+        #### Add model visualization and save to wandb  :TODO: make following a defintion and add to utils ####
+        from torchinfo import summary
+        model_summary = summary(model, 
+                input_size=(1, in_channel, 128, 128, 128),
+                col_names=["input_size", "output_size", "num_params", "kernel_size", "trainable"],
+                depth=6,
+                verbose=1,
+                device=device,
+                row_settings=["var_names"])
         
-
+        # Save model summary to wandb as text file
+        summary_path = os.path.join(model_save_path, "model_summary.txt")
+        with open(summary_path, "w") as f:
+            f.write(str(model_summary))
+        
+        if wandb_active:
+            # Log model summary as a text artifact
+            artifact = wandb.Artifact('model_summary', type='model')
+            artifact.add_file(summary_path)
+            wandb.log_artifact(artifact)
+        
+        ################################
+            
+   
+   
         print("In_channels= ", len(total_modalities))
         print("Batch size = ", train_config.train_batch_size)
-
-
 
 
         optimizer = torch.optim.Adam(model.parameters(), lr=train_config.lr)
@@ -223,7 +243,7 @@ def main (train_config,database_config,k_fold,args,channels_copy):
             rand_assign=rand_assign_channels,
         )
 
-    ### for isles training ####
+
 
     if lr_sched:
 
@@ -231,18 +251,52 @@ def main (train_config,database_config,k_fold,args,channels_copy):
             # warm up the learning rate.
             if current_epoch < 50:
                 return (float(current_epoch) + 1) / float(max(1, 50))
-            elif 50 <= current_epoch <= 250:
+            elif 50 <= current_epoch <= 175:
                 return 1.0
-            elif 250 < current_epoch <= 350:
-                return 0.7
-            elif 350 < current_epoch <= 450:
+            elif 175 < current_epoch <= 250:
                 return 0.4
-            elif 450 < current_epoch <= 550:
-                return 0.2
+            elif 250 < current_epoch <= 350:
+                return 0.1
+            elif 350 < current_epoch <= 550:
+                return 0.1
             else:
-                return max(0.0, 0.2 - ((current_epoch - 550) / float(max(1, epochs - 550)))/5)
+                return max(0.0, 0.1 - ((current_epoch - 550) / float(max(1, epochs - 550)))/5)
                 #return max(0.0, 0.5 * (1.0 + math.cos(math.pi * (current_epoch - warmup_epochs) / max(1, args.E - warmup_epochs))))
         scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
+
+        # def lr_lambda(current_epoch):
+        #     # Parameters for scheduler
+        #     warmup_epochs = 50
+        #     maintain_epochs = 250  # Maintain max LR until this epoch
+        #     decay_schedule = [
+        #         (250, 1.0),
+        #         (350, 0.7),
+        #         (450, 0.4),
+        #         (550, 0.2),
+        #     ]
+        #     min_lr_factor = 0.1  # Minimum LR will be 10% of the final step
+            
+        #     # Warm-up phase
+        #     if current_epoch < warmup_epochs:
+        #         return (float(current_epoch) + 1) / float(warmup_epochs)
+            
+        #     # Maintain phase
+        #     if current_epoch <= maintain_epochs:
+        #         return 1.0
+            
+        #     # Step decay phase
+        #     for epoch_threshold, lr_factor in decay_schedule:
+        #         if current_epoch <= epoch_threshold:
+        #             return lr_factor
+            
+        #     # Final decay phase
+        #     final_decay = max(
+        #         min_lr_factor * decay_schedule[-1][1],  # Don't go below min_lr_factor
+        #         decay_schedule[-1][1] - ((current_epoch - decay_schedule[-1][0]) / 100) * 0.1
+        #     )
+        #     return final_decay
+        # scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
+    
     
     ##training##
 
@@ -766,8 +820,8 @@ if __name__ == "__main__":
 
     #########################
     args = parser.parse_args()
-    args.device_id = 0
-    args.datasets = 'WMH'
+    args.device_id = 1
+    args.datasets = 'ISLES2022'
   
     ######################################
 
@@ -775,12 +829,7 @@ if __name__ == "__main__":
     database_config = config.Database_config()
     channels_copy = copy.deepcopy(database_config.channels)
 
-    #modality_remove = ['T2','T1c','FLAIR']
-
-    # for modality in modality_remove:
-
-    #     train_config.modality_remove = modality
-
+   
     main(train_config, database_config,k_fold=None,args = args,channels_copy = channels_copy)
  
 
