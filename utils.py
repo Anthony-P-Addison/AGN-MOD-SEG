@@ -65,40 +65,39 @@ def rand_set_channels_to_zero_with_invar(
     """
     modalities_remain = []
     
-    if domain_invariant:
-        # append invariant channel
-        batch_img_da = torch.cat((batch_img_data, torch.zeros((batch_img_data.shape[0], 1, 96,96,96))),dim=1)
-    else:
-        batch_img_da = batch_img_data
+   
+    batch_img_da = batch_img_data
 
     for i in range(batch_img_da.shape[0]):   
         # Uniform dropout probability for all cases
-        number_of_dropped_modalities = np.random.randint(0, len(dataset_modalities))
+        number_of_dropped_modalities = np.random.randint(0, len(dataset_modalities)-1) # okay as invar appended already
         
         # Random sampling for all dataset sizes
+        
         modalities_dropped = random.sample(
-            list(np.arange(len(dataset_modalities))),
+            list(np.arange(len(dataset_modalities)-1)),
             number_of_dropped_modalities,
         )
         modalities_dropped.sort()
         
-        # Ensure at least one channel remains
-        if len(modalities_dropped) == len(dataset_modalities):
-            keep_channel = random.randint(0, len(dataset_modalities)-1)
-            modalities_dropped.remove(keep_channel)
-            
         # Apply dropout
         batch_img = batch_img_da.clone()
         batch_img_da[i,modalities_dropped,:,:,:] = 0
         
         modalities_remaining = sorted(
-            set(np.arange(len(dataset_modalities))) - set(modalities_dropped)
+            set(np.arange(len(dataset_modalities)-1)) - set(modalities_dropped)
         )
 
+        if domain_invariant:
+            # append invariant channel
+            batch_img_da = torch.cat((batch_img_data, torch.zeros((batch_img_data.shape[0], 1, 128,128,128))),dim=1)
+    
+
         # Handle invariant channel with augmentations
-        if domain_invariant and random.random() < 0.375:  # Match average modality presence
+        if domain_invariant and random.random() < 0.375 and len(dataset_modalities) > 2:  # Match average modality presence can change to how often want to add info to invariant channel
             invar = None
-            
+
+          
             if mixup:
                 # Mixup augmentation logic
                 if len(modalities_dropped) == 0 and len(modalities_remaining) >= 2:
@@ -167,20 +166,23 @@ def rand_set_channels_to_zero_with_invar(
                         one_mod_dropped=False,
                         two_not_dropped=False,
                         mod_3=False
-                    )
-            
-            # If no augmentation or augmentation failed, use simple channel copy
-            if invar is None:
+                )
+                    
+            ######## TODO:ADD MORE AUGMENTATTIONS HERE WITH A NEW SWITCH FOR THE INVAR CHANNEL##########
+        
+            # If no augmentation or augmentation failed, use simple channel copy (of droppepd_channels)
+            elif invar is None: 
                 if len(modalities_dropped) > 0:
                     channel_add = random.sample(modalities_dropped, 1)
+                    invar = batch_img[i,channel_add,:,:,:]
                 else:
                     channel_add = random.sample(modalities_remaining, 1)
-                invar = batch_img[i,channel_add,:,:,:]
-                
+                    invar = batch_img[i,channel_add,:,:,:]
             batch_img_da[i,[len(dataset_modalities)-1],:,:,:] = invar.to(torch.device("cpu"))
-            
+        
         modalities_remain.append(modalities_remaining)
 
+    
     return modalities_remain, batch_img_da
 
 

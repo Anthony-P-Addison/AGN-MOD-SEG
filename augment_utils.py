@@ -161,7 +161,7 @@ def GIN_module(x,device_id ):
 def IPA_module(x:torch.tensor,device_id = '1'):
     """Apply IPA transformation to the input tensor x.
     """ 
-    # TODO: hard coded for now sort this later and only want to apply these techniwurs to the brain and not the background.
+    # TODO: hard coded for now sort this later and only want to apply these augments to the brain and not the background.
     ipa_config_dict = {
     'epsilon': 0.3,
     'xi': 1e-6,

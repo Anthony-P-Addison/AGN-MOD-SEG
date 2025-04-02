@@ -821,7 +821,7 @@ if __name__ == "__main__":
     #########################
     args = parser.parse_args()
     args.device_id = 1
-    args.datasets = 'ISLES2022'
+    args.datasets = 'WMH_MSSEG_BRATS_ATLAS_TBI'   #'ISLES2022'
   
     ######################################
 
