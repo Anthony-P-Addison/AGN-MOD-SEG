@@ -3,7 +3,7 @@ import os
 import numpy as np
 import numpy.ma as ma
 from glob import glob
-import preprocess
+import old.preprocess as preprocess
 
 if __name__ == "__main__":
     

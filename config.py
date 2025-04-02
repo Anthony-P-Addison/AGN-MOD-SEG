@@ -2,15 +2,15 @@ from pathlib import Path
 
 class Training_config():
 
-    wandb_active:bool = True
+    wandb_active:bool = False
     epoch:int  = 600
-    workers:int = 4 # numworker
+    workers:int = 2 # numworker
     train_batch_size: int = 8
     val_interval:int = 4 # the number of epochs between the validation   # 4 
     lr_sched: bool = True
     lr:float = 1e-3           
     model_type:str = "UNET"  # default model type unet
-    cropped_input_size:tuple = (96,96,96)  # (128, 128, 128)  # (128, 128, 128)
+    cropped_input_size:tuple = (96,96,96) # (128, 128, 128)
     # lr_config
     drop_learning_rate:bool = True
     drop_learning_rate_epoch:int = 150 # 150 # epoch at which to decrease the learning rate
@@ -27,7 +27,7 @@ class Training_config():
     gin_mix = False
     gin_ipa: str = 'GIN_IPA'   # gin
     rand_assign_channels:bool = False
-    domain_invariant_slot:bool = False
+    domain_invariant_slot:bool = True
     Two_domain_invariant_slot:bool = False     # TODO: see if the presence of an extra slot can help training
     single_slot:bool = False
     modality_remove: str = 'ADC' #'T1' #None    # the modality to be removed (useful for testing invariant slot on this modality). None if no modality to be dropped 

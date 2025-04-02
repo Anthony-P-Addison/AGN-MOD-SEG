@@ -44,167 +44,142 @@ def rand_set_channels_to_zero_with_invar(
     dataset_modalities: list,
     batch_img_data: torch.Tensor,
     domain_invariant: bool,
-    mixup: bool,
-    gin_mix: bool,
-    batch_label_data: torch.Tensor,
-    device_id: str,
-    gin_ipa: str,
+    mixup: bool = False,
+    gin_mix: bool = False,
+    gin_ipa: str = None,
+    batch_label_data: torch.Tensor = None,
+    device_id: str = None,
 ) -> tuple[list[int], torch.Tensor]:
-    """Randomly set a subset of channels to zero and use dropped for invariant slot 
-    return a list of modalities remaining(after drop) and an image tensors from remaining channels """
+    """Randomly set channels to zero and handle invariant channel with optional augmentations
+    Args:
+        dataset_modalities: List of modalities in the dataset
+        batch_img_data: Input image batch [B, C, H, W, D]
+        domain_invariant: Whether to use invariant channel
+        mixup: Whether to use mixup augmentation
+        gin_mix: Whether to use GIN augmentation
+        gin_ipa: Type of GIN/IPA augmentation
+        batch_label_data: Labels for supervised augmentation
+        device_id: Device for GIN augmentation
+    Returns:
+        tuple: (list of remaining modalities, augmented batch)
+    """
     modalities_remain = []
-
+    
     if domain_invariant:
-        # append a new channel to dimension 1
-        batch_img_da = torch.cat((batch_img_data, torch.zeros((batch_img_data.shape[0], 1, 128, 128, 128))), dim=1)
+        # append invariant channel
+        batch_img_da = torch.cat((batch_img_data, torch.zeros((batch_img_data.shape[0], 1, 96,96,96))),dim=1)
     else:
         batch_img_da = batch_img_data
 
-    for i in range (batch_img_da.shape[0]):   
-
-        if domain_invariant and not mixup:
-            # just for dropping the non invaraint channels
-            number_of_dropped_modalities = np.random.randint(1,len(dataset_modalities))
-        else:
-            number_of_dropped_modalities = np.random.randint(0,len(dataset_modalities))    
-
-         
-        if len(dataset_modalities) == 2:     #brats
-            modalities_dropped = [1]
-            #modalities_dropped = [0] if np.random.rand() > 0.80 else [1]
+    for i in range(batch_img_da.shape[0]):   
+        # Uniform dropout probability for all cases
+        number_of_dropped_modalities = np.random.randint(0, len(dataset_modalities))
         
-        else:
-
-            modalities_dropped = random.sample(
-                list(np.arange(len(dataset_modalities))),       # drop channels including invariant [:-1]
-                number_of_dropped_modalities,
-            )
+        # Random sampling for all dataset sizes
+        modalities_dropped = random.sample(
+            list(np.arange(len(dataset_modalities))),
+            number_of_dropped_modalities,
+        )
+        modalities_dropped.sort()
         
-            modalities_dropped.sort()
-
-        # copy of batch image data
+        # Ensure at least one channel remains
+        if len(modalities_dropped) == len(dataset_modalities):
+            keep_channel = random.randint(0, len(dataset_modalities)-1)
+            modalities_dropped.remove(keep_channel)
+            
+        # Apply dropout
         batch_img = batch_img_da.clone()
-
-        # multiplied dropped channels by zero.
         batch_img_da[i,modalities_dropped,:,:,:] = 0
+        
         modalities_remaining = sorted(
             set(np.arange(len(dataset_modalities))) - set(modalities_dropped)
         )
 
-        # adding data to the invariant slot
-        if domain_invariant: 
-
-            if mixup ==True: 
-
-                if len(modalities_dropped) == 0:
-                    if modalities_remaining[-1] == len(dataset_modalities) - 1 and len(modalities_remaining) > 1: 
-                        modalities_remaining = modalities_remaining[:-1]
-
-                    channel_add = random.sample(modalities_remaining, 2)    
-                    invar= mixup1_augmentation(
-                        batch_img[i, channel_add, :, :], all_mod_dropped=False, one_mod_dropped =False, two_not_dropped =True, mod_3 = False
-                    )
-    
-
-                elif (modalities_dropped[-1] == len(dataset_modalities)- 1):  # should stop the zero channel multiplications
-                    # remain 0 
-                    invar = batch_img[i,[-1],:,:,:]
-
-                ###### tumors_mix ####
-
-                #yo =random.uniform(0, 1)
-
-                # # select labels to mix
-                # label_channel = random.sample(
-                #     list(np.arange(len(dataset_modalities))), 2
-                # )
-                # # broadcast label to channels
-                # masked_image_tensor = (
-                #     batch_img[i,label_channel, :, :, :]
-                #     * batch_label_data[i,:, :, :, :]
-                # )
-                elif  len(modalities_dropped) == 2:
-                    channel_add = random.sample(modalities_dropped, 2)
+        # Handle invariant channel with augmentations
+        if domain_invariant and random.random() < 0.375:  # Match average modality presence
+            invar = None
+            
+            if mixup:
+                # Mixup augmentation logic
+                if len(modalities_dropped) == 0 and len(modalities_remaining) >= 2:
+                    # Mix two remaining channels
+                    channels = random.sample(modalities_remaining, 2)
                     invar = mixup1_augmentation(
-                        batch_img[i, channel_add, :, :], all_mod_dropped=True, one_mod_dropped =False, two_not_dropped =False, mod_3 = False,
+                        batch_img[i, channels, :, :],
+                        all_mod_dropped=False,
+                        one_mod_dropped=False,
+                        two_not_dropped=True,
+                        mod_3=False
                     )
-                    # if yo > 0.5:
-                    #     invar_tumor, _ = mixup1_augmentation(
-                    #         masked_image_tensor, all_mod_dropped=True
-                    #     )
-
-                    #     invar[invar_tumor > 0] = invar_tumor[invar_tumor > 0]
-
-                # For mixing 3 samples
+                elif len(modalities_dropped) == 1 and len(modalities_remaining) >= 1:
+                    # Mix one dropped with one remaining
+                    channels = random.sample(modalities_remaining, 1) + random.sample(modalities_dropped, 1)
+                    invar = mixup1_augmentation(
+                        batch_img[i, channels, :, :],
+                        all_mod_dropped=False,
+                        one_mod_dropped=True,
+                        two_not_dropped=False,
+                        mod_3=False
+                    )
+                elif len(modalities_dropped) == 2:
+                    # Mix two dropped channels
+                    channels = random.sample(modalities_dropped, 2)
+                    invar = mixup1_augmentation(
+                        batch_img[i, channels, :, :],
+                        all_mod_dropped=True,
+                        one_mod_dropped=False,
+                        two_not_dropped=False,
+                        mod_3=False
+                    )
                 elif len(modalities_dropped) > 2:
-                    channel_add = random.sample(modalities_dropped, 3)
-                    invar= mixup1_augmentation(
-                        batch_img[i, channel_add, :, :], all_mod_dropped=False, one_mod_dropped =False, two_not_dropped =False, mod_3 = True, 
+                    # Mix three dropped channels
+                    channels = random.sample(modalities_dropped, 3)
+                    invar = mixup1_augmentation(
+                        batch_img[i, channels, :, :],
+                        all_mod_dropped=False,
+                        one_mod_dropped=False,
+                        two_not_dropped=False,
+                        mod_3=True
                     )
-
-                elif len(modalities_dropped) == 1:
-                    if modalities_remaining[-1] == len(dataset_modalities) - 1 and len(modalities_remaining) > 1:  # priorities mixing for  samples over invariant. 
-                        modalities_remaining = modalities_remaining[:-1]
-                    channel_add = (
-                        random.sample(modalities_remaining, 1) + modalities_dropped
-                    )
-                    invar= mixup1_augmentation(
-                        batch_img[i, channel_add, :, :], all_mod_dropped=False, one_mod_dropped =True, two_not_dropped =False, mod_3 = False,
-                    )
-
-                # if yo > 0.5:
-                #     invar_tumor, _ = mixup1_augmentation(
-                #         masked_image_tensor, all_mod_dropped=False
-                #     )
-                #     invar[invar_tumor > 0] = invar_tumor[invar_tumor > 0]
-
-                ###################################################
-                # import matplotlib.pyplot as plt
-
-                # # Plot the invariant channel as a slice
-                # invar_np = invar.cpu().numpy()
-                # x_slice_0 = invar_np[:, :, 64]
-
-                # plt.figure(figsize=(12, 4))
-
-                # plt.subplot(1, 3, 1)
-                # plt.imshow(x_slice_0, cmap="gray")
-                # plt.title("Original Image 1")
-                # plt.axis("off")
-
-           
- 
-            elif gin_mix ==True:
-                
-                if len(modalities_dropped) == 0:
-                    if modalities_remaining[-1] == len(dataset_modalities) - 1 and len(modalities_remaining) > 1: 
-                        modalities_remaining = modalities_remaining[:-1]
-
-                        channel_add = random.sample(modalities_remaining, 1)    
-                        invar= mixup_data_causality(
-                            batch_img[i, channel_add, :, :],device_id=device_id,aug_type =gin_ipa, all_mod_dropped=False, one_mod_dropped =False, two_not_dropped =True, mod_3 = False
-                        )
-                elif (modalities_dropped[-1] == len(dataset_modalities)- 1):  # should stop the zero channel multiplications
-                    # remain 0 
-                    invar = batch_img[i,[-1],:,:,:]
-                   
-                elif  len(modalities_dropped) >= 1:
-                    channel_add = random.sample(modalities_dropped, 1)
+                    
+            elif gin_mix:
+                # GIN augmentation logic
+                if len(modalities_dropped) == 0 and len(modalities_remaining) >= 1:
+                    # Augment one remaining channel
+                    channel = random.sample(modalities_remaining, 1)
                     invar = mixup_data_causality(
-                        batch_img[i, channel_add, :, :],device_id = device_id, aug_type = gin_ipa, all_mod_dropped=True, one_mod_dropped =False, two_not_dropped =False, mod_3 = False,
+                        batch_img[i, channel, :, :],
+                        device_id=device_id,
+                        aug_type=gin_ipa,
+                        all_mod_dropped=False,
+                        one_mod_dropped=False,
+                        two_not_dropped=True,
+                        mod_3=False
                     )
-
-            else: 
-                # no data mixing just add dropped modality to invar. channel
-                channel_add = random.sample(modalities_dropped, 1)
+                elif len(modalities_dropped) >= 1:
+                    # Augment one dropped channel
+                    channel = random.sample(modalities_dropped, 1)
+                    invar = mixup_data_causality(
+                        batch_img[i, channel, :, :],
+                        device_id=device_id,
+                        aug_type=gin_ipa,
+                        all_mod_dropped=True,
+                        one_mod_dropped=False,
+                        two_not_dropped=False,
+                        mod_3=False
+                    )
+            
+            # If no augmentation or augmentation failed, use simple channel copy
+            if invar is None:
+                if len(modalities_dropped) > 0:
+                    channel_add = random.sample(modalities_dropped, 1)
+                else:
+                    channel_add = random.sample(modalities_remaining, 1)
                 invar = batch_img[i,channel_add,:,:,:]
-
-            # print(f' channel being added {batch_img[i,channel_add,:,:,:]} ' )
-            #invar = torch.unsqueeze(invar, 0)
-        
-            batch_img_da[i,[len(dataset_modalities)-1],:,:,:] =invar.to(torch.device("cpu"))
-      
-    modalities_remain.append(modalities_remaining)
+                
+            batch_img_da[i,[len(dataset_modalities)-1],:,:,:] = invar.to(torch.device("cpu"))
+            
+        modalities_remain.append(modalities_remaining)
 
     return modalities_remain, batch_img_da
 
