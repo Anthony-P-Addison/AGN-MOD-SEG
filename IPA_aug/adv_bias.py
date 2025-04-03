@@ -73,7 +73,7 @@ class AdvBias3D(AdvTransformBase3D):
                  'space':'log'},
                  use_gpu:bool = True, 
                  debug: bool = False,
-                 device_id = '1'
+                 device_id = '0'
                  ):
         super(AdvBias3D, self).__init__(config_dict=config_dict,use_gpu=use_gpu,debug=debug)
         self.param=None

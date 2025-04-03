@@ -90,7 +90,7 @@ def rand_set_channels_to_zero_with_invar(
 
         if domain_invariant:
             # append invariant channel
-            batch_img_da = torch.cat((batch_img_data, torch.zeros((batch_img_data.shape[0], 1, 128,128,128))),dim=1)
+            batch_img_da = torch.cat((batch_img_data, torch.zeros((batch_img_data.shape[0], 1, batch_img_data.shape[2], batch_img_data.shape[3], batch_img_data.shape[4]))),dim=1)
     
 
         # Handle invariant channel with augmentations

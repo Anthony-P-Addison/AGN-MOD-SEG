@@ -6,7 +6,7 @@ from monai.inferers import sliding_window_inference
 from monai.metrics import DiceMetric, ConfusionMatrixMetric, MeanIoU
 from monai.transforms import Activations, AsDiscrete, Compose
 from nets.unet import res_unet as Unet   
-#from nets.invariant_channel import CustomUNet as Unet
+from nets.unet_deep import res_unet as Unet_deep
 import numpy as np
 import utils
 import config
@@ -106,19 +106,23 @@ class ModelTester:
         self.val_loaders.append(self.val_loader[dataset])
 
     def load_model(self):
-        if self.test_config.model_net_type == "UNET":
-            
+        if self.test_config.model_net_type == "unet_deep":
+            if self.test_config.single_slot:
+                model = Unet_deep(in_channels=1, out_channels=1).to(self.device)
+            else:
+                model = Unet_deep(in_channels=len(self.total_modalities), out_channels=1).to(self.device)
 
+        elif self.test_config.model_net_type == "unet_old":
             if self.test_config.single_slot:
                 model = Unet(in_channels=1, out_channels=1).to(self.device)
             else:
                 model = Unet(in_channels=len(self.total_modalities), out_channels=1).to(self.device)
-            print("LOADING CHECKPOINT: ", self.test_config.model_file_path)
-            checkpoint = torch.load(self.test_config.model_file_path, map_location={"cuda:0": self.cuda_id, "cuda:1": self.cuda_id})
-            model.load_state_dict(checkpoint)
-            print(f'Sum of model parameters: {sum(p.numel() for p in model.parameters())}')
-            return model
-        return None
+        print("LOADING CHECKPOINT: ", self.test_config.model_file_path)
+        checkpoint = torch.load(self.test_config.model_file_path, map_location={"cuda:0": self.cuda_id, "cuda:1": self.cuda_id})
+        model.load_state_dict(checkpoint)
+        print(f'Sum of model parameters: {sum(p.numel() for p in model.parameters())}')
+        return model
+       
 
     def evaluate_model(self, model, combination, modality_list):
         model.eval()
@@ -136,7 +140,7 @@ class ModelTester:
             metric[dataset] = {}
 
             for val_data in self.val_loader[dataset]:
-                if self.test_config.model_net_type == "UNET":
+                if self.test_config.model_net_type == "unet_deep" or "unet_old":
                     if self.test_config.single_slot:
                         val_data[0] = utils.create_single_channel_UNET_input(
                             val_data,
@@ -252,14 +256,14 @@ if __name__ == "__main__":
 
     ####################
 
-    args.datasets_to_test = 'WMH' #'TBI' # dataset for testing
-    args.modalities_to_test ="0_1"       # numeric order of modalities
+    args.datasets_to_test = 'ISLES' #'TBI' # dataset for testing
+    args.modalities_to_test ="0_1_2_3"       # numeric order of modalities
     args.test_all_combinations = 1
     args.device_id = 0
     args.trained_on = 'WMH_MSSEG_BRATS_ATLAS_TBI'    # The datasets the model was trained on
     #########################
 
-    checkpoint1 = ['models/all_in_one/WMH_MSSEG_BRATS_ATLAS_TBI/all_in_one_random_drop_1_2024-12-19_17-40_Epoch_599.pth']
+    checkpoint1 = ['models/Mixup/_model_remove:_None/WMH_MSSEG_BRATS_ATLAS_TBI/2025-04-02_19-41/Mixup_random_drop_True_2025-04-02_19-41_Epoch_199.pth']
     #['models/all_in_one/_model_remove:_None/TBI/2025-02-13_21-31/all_in_one_random_drop_False_2025-02-13_21-31_Epoch_599.pth']
 
 

@@ -1,6 +1,5 @@
 import torch
 import numpy as np
-import torchvision
 from IPA_aug.imagefilter3d import GINGroupConv3D
 
 
@@ -158,7 +157,7 @@ def GIN_module(x,device_id ):
 
 
 
-def IPA_module(x:torch.tensor,device_id = '1'):
+def IPA_module(x:torch.tensor,device_id ):
     """Apply IPA transformation to the input tensor x.
     """ 
     # TODO: hard coded for now sort this later and only want to apply these augments to the brain and not the background.
