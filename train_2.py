@@ -591,7 +591,7 @@ def main (train_config,database_config,k_fold,args,channels_copy):
 
                 ################ I want to test isles as I go along to see how it does #######################
                 
-                
+                # Test with all modalities
                 for val_data in ISLES_val_loader["ISLES"]:
                     
                     channels['ISLES'] = [x if x != 'DWI' else 'invar' for x in channels['ISLES']]
@@ -662,12 +662,80 @@ def main (train_config,database_config,k_fold,args,channels_copy):
                     )
                 )
                 total_av_dice.append(metric["ISLES"]["dice"])
+                
+                # Test with only the invariant channel
+                dice_metric_invar = DiceMetric(include_background=True, reduction="mean")
+                sensitivity_metric_invar = ConfusionMatrixMetric(metric_name="sensitivity", include_background=True)
+                precision_metric_invar = ConfusionMatrixMetric(metric_name="precision", include_background=True)
+                IOU_metric_invar = MeanIoU(include_background=True)
+                
+                for val_data in ISLES_val_loader["ISLES"]:
+                    # Create input with only the invariant channel
+                    input_data_invar = torch.from_numpy(
+                        np.zeros(
+                            (
+                                1,
+                                len(total_modalities),
+                                val_data[0].shape[2],
+                                val_data[0].shape[3],
+                                val_data[0].shape[4],
+                            ),
+                            dtype=np.float32,
+                        )
+                    )
+                    
+                    # Find the invariant channel index
+                    invar_channel_idx = None
+                    for i, modality in enumerate(channels['ISLES']):
+                        if modality == 'invar':
+                            invar_channel_idx = channel_map['ISLES'][i]
+                            break
+                    
+                    if invar_channel_idx is not None:
+                        # Copy only the invariant channel
+                        input_data_invar[:, invar_channel_idx, :, :, :] = val_data[0][:, i, :, :, :]
+                    else:
+                        print("Warning: No invariant channel found in ISLES data")
+                    
+                    input_data_invar = input_data_invar.to(device)
+                    label = val_data[1].to(device)
+                    roi_size = (
+                        cropped_input_size[0],
+                        cropped_input_size[1],
+                        cropped_input_size[2],
+                    )
+                    sw_batch_size = 1
+                    val_outputs_invar = sliding_window_inference(
+                        input_data_invar, roi_size, sw_batch_size, model
+                    )
+                    val_outputs_invar = [
+                        post_trans(i) for i in decollate_batch(val_outputs_invar)
+                    ]
+                    dice_metric_invar(y_pred=val_outputs_invar, y=label)
+                    sensitivity_metric_invar(y_pred=val_outputs_invar, y=label)
+                    precision_metric_invar(y_pred=val_outputs_invar, y=label)
+                    IOU_metric_invar(y_pred=val_outputs_invar, y=label)
+                
+                metric["ISLES_invar"] = {
+                    "dice": dice_metric_invar.aggregate().item(),
+                    "sensitivity": sensitivity_metric_invar.aggregate()[0].item(),
+                    "precision": precision_metric_invar.aggregate()[0].item(),
+                    "IOU": IOU_metric_invar.aggregate().item(),
+                }
+                
+                print(
+                    "current epoch: {} current mean dice ISLES (invar only): {:.4f}".format(
+                        epoch + 1,
+                        metric["ISLES_invar"]["dice"],
+                    )
+                )
+                
                 if wandb_active:
                     wandb.log(
                         {
                             "epoch_val": epoch + 1,
                             "mdice_ISLES": metric["ISLES"]["dice"],
-
+                            "mdice_ISLES_invar": metric["ISLES_invar"]["dice"],
                         }
                     )
                 ##########################################

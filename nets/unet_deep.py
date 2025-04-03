@@ -23,8 +23,8 @@ class res_unet(nn.Module):
 
         # Separate processing for invariant channel (no downsampling)
         self.invariant_stream = nn.Sequential(
-            ResidualUnit(spatial_dims=3, in_channels=1, out_channels=8, strides=1, kernel_size=3, subunits=1, dropout=0.2),
-            ResidualUnit(spatial_dims=3, in_channels=8, out_channels=16, strides=1, kernel_size=3, subunits=1, dropout=0.2)
+            ResidualUnit(spatial_dims=3, in_channels=1, out_channels=4, strides=1, kernel_size=3, subunits=1, dropout=0.2),
+            ResidualUnit(spatial_dims=3, in_channels=4, out_channels=8, strides=1, kernel_size=3, subunits=1, dropout=0.2)
         )
 
         # Modality-specific processing (reduced input channels by 1 for invariant channel)
@@ -32,7 +32,7 @@ class res_unet(nn.Module):
         
         # Main encoder path (for modality-specific channels)
         self.conv_1 = ResidualUnit(spatial_dims=3, in_channels=modality_channels, out_channels=modality_channels, strides=1, kernel_size=3, subunits=1, dropout=0.2)
-        self.down_conv_1 = Convolution(spatial_dims=3, in_channels=modality_channels, out_channels=16, strides=2, kernel_size=3, dropout=0.2)
+        self.down_conv_1 = Convolution(spatial_dims=3, in_channels=14, out_channels=32, strides=2, kernel_size=3, dropout=0.2)
         conv_2 = ResidualUnit(spatial_dims=3,in_channels=32,out_channels=32,strides=1,kernel_size=3,subunits=1,dropout=0.2)
         down_conv_2 = Convolution(spatial_dims=3,in_channels=32,out_channels=64,strides=2,kernel_size=3,dropout=0.2)
         conv_3 = ResidualUnit(spatial_dims=3,in_channels=64,out_channels=64,strides=1,kernel_size=3,subunits=1,dropout=0.2)
@@ -95,7 +95,7 @@ class res_unet(nn.Module):
         up_in_3 = torch.cat((up_out_2,conv_out_2),dim=1)
         up_out_3 = self.up_stage_3(up_in_3)
 
-        up_in_4 = torch.cat((up_out_3,conv_out_1),dim=1)
+        up_in_4 = torch.cat((up_out_3,down1),dim=1)
         up_out_4 = self.up_stage_4(up_in_4)
 
         return up_out_4

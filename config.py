@@ -2,11 +2,11 @@ from pathlib import Path
 
 class Training_config():
 
-    wandb_active:bool = False
+    wandb_active:bool = True
     epoch:int  = 600
     workers:int = 2 # numworker
     train_batch_size: int = 2
-    val_interval:int = 4 # the number of epochs between the validation   # 4 
+    val_interval:int = 1 # the number of epochs between the validation   # 4 
     lr_sched: bool = False
     lr:float = 1e-4           
     model_type:str = "UNET"  # default model type unet
@@ -22,12 +22,12 @@ class Training_config():
     random_drop:int = 1  # 1 for to be dropped and 0 for not to be dropped. 
 
     ######### slot allocation #############
+    domain_invariant_slot:bool = True
 
-    mixup :bool = False
-    gin_mix = True
+    mixup :bool = True
+    gin_mix = False
     gin_ipa: str = 'GIN_IPA'   # gin
     rand_assign_channels:bool = False
-    domain_invariant_slot:bool = True
     Two_domain_invariant_slot:bool = False     # TODO: see if the presence of an extra slot can help training
     single_slot:bool = False
     modality_remove: str = None #'T1' #None    # the modality to be removed (useful for testing invariant slot on this modality). None if no modality to be dropped 
