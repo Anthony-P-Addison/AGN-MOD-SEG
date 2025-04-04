@@ -6,10 +6,10 @@ class Training_config():
     epoch:int  = 600
     workers:int = 2 # numworker
     train_batch_size: int = 2
-    val_interval:int = 1 # the number of epochs between the validation   # 4 
+    val_interval:int = 4 # the number of epochs between the validation   # 4 
     lr_sched: bool = False
     lr:float = 1e-4           
-    model_type:str = "UNET"  # default model type unet
+    model_type:str = "deep_unet"   #  deep_unet, old_unet
     cropped_input_size:tuple = (96,96,96) # (128, 128, 128)
     # lr_config
     drop_learning_rate:bool = True

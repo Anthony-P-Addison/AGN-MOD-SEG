@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from nets.residual_block import ResidualUnit_changed as ResidualUnit
+from nets.residual_block_identity import ResidualUnit_changed as ResidualUnit
 from monai.networks.blocks import Convolution
 
 
@@ -21,11 +21,25 @@ class res_unet(nn.Module):
         dropout = 0.2
         print("Dropout: ",dropout)
 
-        # Separate processing for invariant channel (no downsampling)
+        # # Separate processing for invariant channel (no downsampling)
+        # self.invariant_stream = nn.Sequential(
+        #     ResidualUnit(spatial_dims=3, in_channels=1, out_channels=4, strides=1, kernel_size=3, subunits=1, dropout=0.2),
+        #     ResidualUnit(spatial_dims=3, in_channels=4, out_channels=8, strides=1, kernel_size=3, subunits=1, dropout=0.2)
+        # )
+
+        # Replace the current invariant_stream with a more robust feature extractor
         self.invariant_stream = nn.Sequential(
-            ResidualUnit(spatial_dims=3, in_channels=1, out_channels=4, strides=1, kernel_size=3, subunits=1, dropout=0.2),
-            ResidualUnit(spatial_dims=3, in_channels=4, out_channels=8, strides=1, kernel_size=3, subunits=1, dropout=0.2)
-        )
+        # Initial feature extraction
+        ResidualUnit(spatial_dims=3, in_channels=1, out_channels=8, strides=1, kernel_size=3, subunits=2, dropout=0.2),
+        # Multi-scale processing
+        nn.ModuleList([
+            ResidualUnit(spatial_dims=3, in_channels=8, out_channels=16, strides=1, kernel_size=k, subunits=1, dropout=0.2)
+            for k in [1, 3, 5]  # Multiple kernel sizes to capture features at different scales
+        ]),
+
+        # Feature fusion
+        Convolution(spatial_dims=3, in_channels=16*3, out_channels=16, strides=1, kernel_size=1))
+
 
         # Modality-specific processing (reduced input channels by 1 for invariant channel)
         modality_channels = in_channels - 1 if invariant_channel else in_channels

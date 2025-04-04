@@ -6,9 +6,8 @@ from monai.inferers import sliding_window_inference
 from monai.metrics import DiceMetric, ConfusionMatrixMetric, MeanIoU
 from monai.transforms import Activations, AsDiscrete, Compose
 from monai.losses.dice import DiceLoss
-#from nets.unet import res_unet as Unet
-from nets.unet_deep import res_unet as Unet
-from nets.invariant_channelqq import CustomUNet
+from nets.unet import res_unet as unet_old
+from nets.unet_deep import res_unet as unet_deep
 import numpy as np
 import utils
 import wandb
@@ -167,59 +166,63 @@ def main (train_config,database_config,k_fold,args,channels_copy):
 
     # initialize the model (only show multiunet here)
 
-    if train_config.model_type == "UNET":
-        print("TRAINING WITH UNET")
-       
-        if train_config.single_slot:
-            in_channel = 1
-            
-        else:
-            in_channel = len(total_modalities)
+    if train_config.single_slot:
+        in_channel = 1  
+    else:
+        in_channel = len(total_modalities)
 
-        model = Unet(in_channels=in_channel).to(device)
 
-        #### Add model visualization and save to wandb  :TODO: make following a defintion and add to utils ####
-        from torchinfo import summary
-        model_summary = summary(model, 
-                input_size=(1, in_channel, 96, 96, 96),
-                col_names=["input_size", "output_size", "num_params", "kernel_size", "trainable"],
-                depth=6,
-                verbose=1,
-                device=device,
-                row_settings=["var_names"])
+    if train_config.model_type == "old_unet":
+        print("TRAINING WITH old_unet")
+        model = unet_old(in_channels=in_channel).to(device)
+
+    elif train_config.model_type == "deep_unet":
+        print("TRAINING WITH DEEP UNET")
+        model = unet_deep(in_channels=in_channel).to(device)
+
+
+    #### Add model visualization and save to wandb  :TODO: make following a defintion and add to utils ####
+    from torchinfo import summary
+    model_summary = summary(model, 
+            input_size=(1, in_channel, 96, 96, 96),
+            col_names=["input_size", "output_size", "num_params", "kernel_size", "trainable"],
+            depth=6,
+            verbose=1,
+            device=device,
+            row_settings=["var_names"])
+    
+    # Save model summary to wandb as text file
+    summary_path = os.path.join(model_save_path, "model_summary.txt")
+    with open(summary_path, "w") as f:
+        f.write(str(model_summary))
+    
+    if wandb_active:
+        # Log model summary as a text artifact
+        artifact = wandb.Artifact('model_summary', type='model')
+        artifact.add_file(summary_path)
+        wandb.log_artifact(artifact)
+    
+    ################################
         
-        # Save model summary to wandb as text file
-        summary_path = os.path.join(model_save_path, "model_summary.txt")
-        with open(summary_path, "w") as f:
-            f.write(str(model_summary))
+
+
+    print("In_channels= ", len(total_modalities))
+    print("Batch size = ", train_config.train_batch_size)
+
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=train_config.lr)
+    epoched = 0
+
+    # load pre-trained weights
+    if train_config.load_pre_trained_model:
+
+        print("LOADING MODEL: ", load_model_path)
+
+        checkpoint = torch.load(
+                load_model_path, map_location={"cuda:0": cuda_id, "cuda:1": cuda_id}
+            )
         
-        if wandb_active:
-            # Log model summary as a text artifact
-            artifact = wandb.Artifact('model_summary', type='model')
-            artifact.add_file(summary_path)
-            wandb.log_artifact(artifact)
-        
-        ################################
-            
-   
-   
-        print("In_channels= ", len(total_modalities))
-        print("Batch size = ", train_config.train_batch_size)
-
-
-        optimizer = torch.optim.Adam(model.parameters(), lr=train_config.lr)
-        epoched = 0
-
-        # load pre-trained weights
-        if train_config.load_pre_trained_model:
-
-            print("LOADING MODEL: ", load_model_path)
-
-            checkpoint = torch.load(
-                    load_model_path, map_location={"cuda:0": cuda_id, "cuda:1": cuda_id}
-                )
-            
-            model.load_state_dict(checkpoint)         
+        model.load_state_dict(checkpoint)         
    
 
     # defined loss function
@@ -889,7 +892,7 @@ if __name__ == "__main__":
 
     #########################
     args = parser.parse_args()
-    args.device_id = 0
+    args.device_id = 1
     args.datasets = 'WMH_MSSEG_BRATS_ATLAS_TBI'   #'ISLES2022'
   
     ######################################
