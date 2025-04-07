@@ -2,7 +2,7 @@ from pathlib import Path
 
 class Training_config():
 
-    wandb_active:bool = True
+    wandb_active:bool = False
     epoch:int  = 600
     workers:int = 2 # numworker
     train_batch_size: int = 2

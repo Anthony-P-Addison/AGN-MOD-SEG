@@ -21,32 +21,29 @@ class res_unet(nn.Module):
         dropout = 0.2
         print("Dropout: ",dropout)
 
-        # # Separate processing for invariant channel (no downsampling)
-        # self.invariant_stream = nn.Sequential(
-        #     ResidualUnit(spatial_dims=3, in_channels=1, out_channels=4, strides=1, kernel_size=3, subunits=1, dropout=0.2),
-        #     ResidualUnit(spatial_dims=3, in_channels=4, out_channels=8, strides=1, kernel_size=3, subunits=1, dropout=0.2)
-        # )
-
-        # Replace the current invariant_stream with a more robust feature extractor
+        # Simplified invariant channel processing - just two sequential ResidualUnits
         self.invariant_stream = nn.Sequential(
-        # Initial feature extraction
-        ResidualUnit(spatial_dims=3, in_channels=1, out_channels=8, strides=1, kernel_size=3, subunits=2, dropout=0.2),
-        # Multi-scale processing
-        nn.ModuleList([
-            ResidualUnit(spatial_dims=3, in_channels=8, out_channels=16, strides=1, kernel_size=k, subunits=1, dropout=0.2)
-            for k in [1, 3, 5]  # Multiple kernel sizes to capture features at different scales
-        ]),
-
-        # Feature fusion
-        Convolution(spatial_dims=3, in_channels=16*3, out_channels=16, strides=1, kernel_size=1))
-
+            ResidualUnit(spatial_dims=3, in_channels=1, out_channels=4, strides=1, kernel_size=3, subunits=1, dropout=0.2),
+            ResidualUnit(spatial_dims=3, in_channels=4, out_channels=8, strides=1, kernel_size=3, subunits=1, dropout=0.2)
+        )
 
         # Modality-specific processing (reduced input channels by 1 for invariant channel)
         modality_channels = in_channels - 1 if invariant_channel else in_channels
         
         # Main encoder path (for modality-specific channels)
         self.conv_1 = ResidualUnit(spatial_dims=3, in_channels=modality_channels, out_channels=modality_channels, strides=1, kernel_size=3, subunits=1, dropout=0.2)
-        self.down_conv_1 = Convolution(spatial_dims=3, in_channels=14, out_channels=32, strides=2, kernel_size=3, dropout=0.2)
+        
+        # Cross-modality attention - allows information sharing between paths
+        self.cross_attention = nn.Sequential(
+            Convolution(spatial_dims=3, in_channels=modality_channels + 8, out_channels=16, strides=1, kernel_size=1),
+            nn.Sigmoid()
+        )
+        
+        # Adaptive fusion layer - learns how to combine features from both paths
+        self.adaptive_fusion = Convolution(spatial_dims=3, in_channels=modality_channels + 8, out_channels=modality_channels + 8, strides=1, kernel_size=1)
+        
+        # Maintain downstream network as before
+        self.down_conv_1 = Convolution(spatial_dims=3, in_channels=modality_channels + 8, out_channels=32, strides=2, kernel_size=3, dropout=0.2)
         conv_2 = ResidualUnit(spatial_dims=3,in_channels=32,out_channels=32,strides=1,kernel_size=3,subunits=1,dropout=0.2)
         down_conv_2 = Convolution(spatial_dims=3,in_channels=32,out_channels=64,strides=2,kernel_size=3,dropout=0.2)
         conv_3 = ResidualUnit(spatial_dims=3,in_channels=64,out_channels=64,strides=1,kernel_size=3,subunits=1,dropout=0.2)
@@ -83,18 +80,17 @@ class res_unet(nn.Module):
         invariant_x = x[:, -1:, ...]  # Take last channel as invariant
         modality_x = x[:, :-1, ...]    # Rest are modality-specific
 
-        # Process invariant channel at full resolution
+        # Process invariant channel - simpler sequential processing
         invariant_features = self.invariant_stream(invariant_x)
-
+        
         # Process modality-specific channels
-        conv_out_1 = self.conv_1(modality_x)
+        modality_features = self.conv_1(modality_x)
 
-        # concat invariant and modality features]
-        fused_features = torch.cat((invariant_features, conv_out_1), dim=1)
-
-        down1= self.down_conv_1(fused_features)
+        # Concatenate processed invariant and modality features
+        fused_features = torch.cat((invariant_features, modality_features), dim=1)
 
         # Continue with regular processing
+        down1 = self.down_conv_1(fused_features)
         conv_out_2 = self.conv_2(down1)
         conv_out_3 = self.conv_3(conv_out_2)
         conv_out_4 = self.conv_4(conv_out_3)

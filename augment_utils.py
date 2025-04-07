@@ -27,24 +27,24 @@ def mixup1_augmentation(x: torch.tensor, all_mod_dropped: bool, one_mod_dropped:
         lam1, lam2, lam3 = float(lam1), float(lam2), float(lam3)
         mixed_x = torch.mul(mix_operations(x[0]),lam1) + torch.mul(mix_operations(x[1]),lam2) + torch.mul(mix_operations(x[2]),lam3)   
     ###################################################################################
-    # import matplotlib.pyplot as plt
+    import matplotlib.pyplot as plt
 
     # # Assuming x is a batch of images with shape (batch_size, channels, height, width)
     # # Convert the tensor to a numpy array and transpose to (height, width, channels) for plotting
-    # mixed_x_np = mixed_x.cpu().numpy()
+    mixed_x_np = mixed_x.cpu().numpy()
 
-    # mixed_x_slice = mixed_x_np[:, :, 64]
+    mixed_x_slice = mixed_x_np[:, :, 64]
 
-    # # Plot original images
-    # x_np_0 = x[0].cpu().numpy()
-    # x_np_1 = x[1].cpu().numpy()
+    # Plot original images
+    x_np_0 = x[0].cpu().numpy()
+    x_np_1 = x[1].cpu().numpy()
 
-    # if mod_3:
-    #     x_np_2 = x[2].cpu().numpy()
-    #     x_slice_2 = x_np_2[:, :, 64]
+    if mod_3:
+        x_np_2 = x[2].cpu().numpy()
+        x_slice_2 = x_np_2[:, :, 64]
 
-    # x_slice_0 = x_np_0[:, :, 64]
-    # x_slice_1 = x_np_1[:, :, 64]
+    x_slice_0 = x_np_0[:, :, 64]
+    x_slice_1 = x_np_1[:, :, 64]
 
     # plt.figure(figsize=(12, 5))
 
@@ -74,31 +74,50 @@ def mixup1_augmentation(x: torch.tensor, all_mod_dropped: bool, one_mod_dropped:
     # plt.show()
     # # plt.savefig('mixed_image.png')
     # # print("Image saved as 'mixed_image.png'")
-    # plt.subplot(1, 4, 1)
-    # plt.imshow(x_slice_0, cmap="gray")
-    # plt.title("Original Image 1")
-    # plt.axis("off")
+    plt.subplot(1, 4, 1)
+    plt.imshow(x_slice_0, cmap="gray")
+    plt.title("Original Image 1")
+    plt.axis("off")
 
-    # plt.subplot(1, 4, 2)
-    # plt.imshow(x_slice_1, cmap="gray")
-    # plt.title("Original Image 2")
-    # plt.axis("off")
+    plt.subplot(1, 4, 2)
+    plt.imshow(x_slice_1, cmap="gray")
+    plt.title("Original Image 2")
+    plt.axis("off")
 
-    # plt.subplot(1, 4, 3)
-    # if mod_3 == True:
-    #     plt.imshow(x_slice_2, cmap="gray")
-    # plt.title("Original Image 3")
-    # plt.axis("off")
+    plt.subplot(1, 4, 3)
+    if mod_3 == True:
+        plt.imshow(x_slice_2, cmap="gray")
+    plt.title("Original Image 3")
+    plt.axis("off")
 
 
-    # plt.subplot(1, 4, 4)
-    # plt.imshow(mixed_x_slice, cmap="gray")
-    # plt.title("Mixed Image")
-    # plt.axis("off")
-    # plt.show()
-    # # plt.savefig('mixed_image.png')
-    # print("Image saved as 'mixed_image.png'")
+    plt.subplot(1, 4, 4)
+    plt.imshow(mixed_x_slice, cmap="gray")
+    plt.title("Mixed Image")
+    plt.axis("off")
+    plt.show()
+    plt.savefig('mixed_image.png')
+    print("Image saved as 'mixed_image.png'")
+    print(f"Before mixing - Min: {x.min().item():.4f}, Max: {x.max().item():.4f}")
+    print(f"After mixing - Min: {mixed_x.min().item():.4f}, Max: {mixed_x.max().item():.4f}")
+    # Calculate and print pixel distribution statistics
+    print("\nPixel Distribution Analysis:")
+    print("Before augmentation:")
+    print(f"Mean: {x.mean().item():.4f}")
+    print(f"Median: {torch.median(x).item():.4f}")
+    print(f"Standard Deviation: {x.std().item():.4f}")
+    print(f"25th percentile: {torch.quantile(x, 0.25).item():.4f}")
+    print(f"75th percentile: {torch.quantile(x, 0.75).item():.4f}")
+    
+    print("\nAfter augmentation:")
+    print(f"Mean: {mixed_x.mean().item():.4f}")
+    print(f"Median: {torch.median(mixed_x).item():.4f}")
+    print(f"Standard Deviation: {mixed_x.std().item():.4f}")
+    print(f"25th percentile: {torch.quantile(mixed_x, 0.25).item():.4f}")
+    print(f"75th percentile: {torch.quantile(mixed_x, 0.75).item():.4f}")
     return mixed_x
+
+
 
 # Example usage in mix_operations
 def mix_operations(
