@@ -63,7 +63,7 @@ class AdvBias3D(AdvTransformBase3D):
     """
     def __init__(self,
                  config_dict={
-                'epsilon':0.3,
+                  'epsilon':0.3,
                  'xi':1e-6,
                  'control_point_spacing':[32,32,32],
                  'downscale':2,

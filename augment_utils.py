@@ -164,27 +164,17 @@ def GIN_module(x,device_id ):
     return out
 
 
-# def mixup_data(x: torch.tensor, all_mod_dropped: bool, one_mod_dropped:bool, two_not_dropped:bool, mod_3: bool):
-#     """Returns mixed inputs, pairs of targets, and lambda
-#     """
-#     if all_mod_dropped or one_mod_dropped or two_not_dropped or mod_3:
-#         gin_x=GIN_module(x)
-#     return gin_x
-
-
 ####  IPA from CHENG et al. ####
-
-
 
 def IPA_module(x:torch.tensor,device_id ):
     """Apply IPA transformation to the input tensor x.
     """ 
     # TODO: hard coded for now sort this later and only want to apply these augments to the brain and not the background.
     ipa_config_dict = {
-    'epsilon': 0.3,
+    'epsilon': 0.05,
     'xi': 1e-6,
-    'control_point_spacing': [8, 8, 8],
-    'downscale': 2,  # Increase downscale factor to reduce memory usage
+    'control_point_spacing': [8,8,8],
+    'downscale': 2,   #ase downscale factor to reduce memory usage
     'data_size': [1, 1, 128, 128, 128],
     'interpolation_order': 3,
     'init_mode': 'gaussian',
@@ -206,15 +196,13 @@ def IPA_module(x:torch.tensor,device_id ):
 def mixup_data_causality(x: torch.tensor, device_id, aug_type:str, all_mod_dropped: bool, one_mod_dropped:bool, two_not_dropped:bool, mod_3: bool):
     """Returns mixed inputs, pairs of targets, and lambda
     """
-
     cuda_id = "cuda:" + str(device_id)
     device = torch.device(cuda_id)
     x = x.to(device)
-  
-    threshold = torch.min(x)+0.01
 
-    ###FIXME: REMOVE 
-    x_ed = (torch.where(x > threshold, x, torch.tensor(0.0, dtype=x.dtype)))
+    # FIXME: trying to do augmentation to foregorund- need to make this more precise
+    threshold = torch.min(x)
+    x_ed = (torch.where(x > threshold + 0.01, x, torch.tensor(0.0, dtype=x.dtype)))
    
     if all_mod_dropped or one_mod_dropped or two_not_dropped or mod_3:
         if aug_type == 'GIN':
@@ -236,18 +224,6 @@ def mixup_data_causality(x: torch.tensor, device_id, aug_type:str, all_mod_dropp
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
 if __name__ == "__main__":
 
     #### unit test for gin/ipa #### 
@@ -256,10 +232,9 @@ if __name__ == "__main__":
     #mixup_data(torch.rand( 1, 128, 128, 128),device_id = '1', aug_type = 'GIN_IPA', all_mod_dropped=True, one_mod_dropped=False, two_not_dropped=False, mod_3=False)
 
     # load up nifty and do it with that. 
-
     # Load NIfTI file
     import nibabel as nib
-    nifti_file = 'data/BRATS/Images/BRATS_056_normed_on_mask.nii.gz'
+    nifti_file = 'data/TBI/Images/CENTER-TBI-2020-6_Sub-021-4MbF392_Site-06-a72b20.nii.gz'
     nifti_img = nib.load(nifti_file)
     nifti_data = nifti_img.get_fdata()
 
@@ -282,7 +257,7 @@ if __name__ == "__main__":
 
     # Apply mixup_data function
 
-    result = mixup_data(cropped_tensor, device_id='1', aug_type='GIN_IPA', all_mod_dropped=True, one_mod_dropped=False, two_not_dropped=False, mod_3=False)
+    result = mixup_data_causality(cropped_tensor, device_id='1', aug_type='GIN_IPA', all_mod_dropped=True, one_mod_dropped=False, two_not_dropped=False, mod_3=False)
 
     import matplotlib.pyplot as plt
 
@@ -290,11 +265,21 @@ if __name__ == "__main__":
     result_np = result.cpu().numpy()
 
     # Select a slice to plot
-    slice_index = 50
+    slice_index = 70
     result_slice = result_np[0,0, :, :, slice_index]
+    
+    cropped_tensor_np = cropped_tensor.cpu().numpy()
+    original_slice = cropped_tensor_np[0, :, :, slice_index]
 
+    
     # Plot the result
     plt.figure(figsize=(6, 6))
+    plt.subplot(1, 2, 1)
+    plt.imshow(original_slice, cmap="gray")
+    plt.title("Original Image Slice")
+    plt.axis("off")
+
+    plt.subplot(1, 2, 2)
     plt.imshow(result_slice, cmap="gray")
     plt.title("Transformed Image Slice")
     plt.axis("off")

@@ -2,7 +2,7 @@ from pathlib import Path
 
 class Training_config():
 
-    wandb_active:bool = False
+    wandb_active:bool = True
     epoch:int  = 600
     workers:int = 2 # numworker
     train_batch_size: int = 2
@@ -13,7 +13,7 @@ class Training_config():
     cropped_input_size:tuple = (96,96,96) # (128, 128, 128)
     # lr_config
     drop_learning_rate:bool = True
-    drop_learning_rate_epoch:int = 175 # 150 # epoch at which to decrease the learning rate
+    drop_learning_rate_epoch:int = 125 # 150 # epoch at which to decrease the learning rate
     drop_learning_rate_value:float = 3e-5
     # pre trained model:
     load_pre_trained_model:bool = False  # if true will load pre-train model  
@@ -24,7 +24,7 @@ class Training_config():
     ######### slot allocation #############
     domain_invariant_slot:bool = True
 
-    mixup :bool = True
+    mixup :bool = False
     gin_mix = False
     gin_ipa: str = 'GIN_IPA'   # gin
     rand_assign_channels:bool = False
@@ -32,7 +32,7 @@ class Training_config():
     single_slot:bool = False
     modality_remove: str = None #'T1' #None    # the modality to be removed (useful for testing invariant slot on this modality). None if no modality to be dropped 
     #### admin  ####
-    project_name:str = "Mixup"   # wandb project name:   # all_in_one   # shuffle_slots  # modality_invariant_slot  # Mixup
+    project_name:str = "modality_invariant_slot"   # wandb project name:   # all_in_one   # shuffle_slots  # modality_invariant_slot  # Mixup
     model_save_path:str = "models/" + project_name + "/_model_remove:_" + str(modality_remove) + "/" # path to save the model
 
 

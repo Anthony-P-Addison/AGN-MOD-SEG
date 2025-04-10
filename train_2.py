@@ -202,7 +202,7 @@ def main (train_config,database_config,k_fold,args,channels_copy):
         artifact.add_file(summary_path)
         wandb.log_artifact(artifact)
     
-    ################################
+    # ################################
         
 
 
@@ -892,7 +892,7 @@ if __name__ == "__main__":
 
     #########################
     args = parser.parse_args()
-    args.device_id = 1
+    args.device_id = 0
     args.datasets = 'WMH_MSSEG_BRATS_ATLAS_TBI'   #'ISLES2022'
   
     ######################################
