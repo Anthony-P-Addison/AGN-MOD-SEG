@@ -5,7 +5,7 @@ class Training_config():
     wandb_active:bool = True
     epoch:int  = 600
     workers:int = 2 # numworker
-    train_batch_size: int = 2
+    train_batch_size: int = 6
     val_interval:int = 4 # the number of epochs between the validation   # 4 
     lr_sched: bool = False
     lr:float = 1e-4           
@@ -13,8 +13,8 @@ class Training_config():
     cropped_input_size:tuple = (96,96,96) # (128, 128, 128)
     # lr_config
     drop_learning_rate:bool = True
-    drop_learning_rate_epoch:int = 125 # 150 # epoch at which to decrease the learning rate
-    drop_learning_rate_value:float = 3e-5
+    drop_learning_rate_epoch:int = 150 # 150 # epoch at which to decrease the learning rate
+    drop_learning_rate_value:float = 1e-5
     # pre trained model:
     load_pre_trained_model:bool = False  # if true will load pre-train model  
     load_model_path:Path =  'models/Mixup/_model_remove:_None/MSSEG_TBI_BRATS_WMH_ATLAS/2025-02-21_23-40/Mixup_random_drop_True_2025-02-21_23-40_Epoch_149.pth'   ##"models/modality_invariant_slot/WMH_MSSEG/modality_invariant_slot_random_drop_1WMH_MSSEG_TOTAL_AVERAGE.pth"  # path to model .pt file
@@ -30,9 +30,9 @@ class Training_config():
     rand_assign_channels:bool = False
     Two_domain_invariant_slot:bool = False     # TODO: see if the presence of an extra slot can help training
     single_slot:bool = False
-    modality_remove: str = None #'T1' #None    # the modality to be removed (useful for testing invariant slot on this modality). None if no modality to be dropped 
+    modality_remove: str = 'FLAIR' #'T1' #None    # the modality to be removed (useful for testing invariant slot on this modality). None if no modality to be dropped 
     #### admin  ####
-    project_name:str = "modality_invariant_slot"   # wandb project name:   # all_in_one   # shuffle_slots  # modality_invariant_slot  # Mixup
+    project_name:str = "WMH_PRELIM_TEST"   # wandb project name:   # all_in_one   # shuffle_slots  # modality_invariant_slot  # Mixup
     model_save_path:str = "models/" + project_name + "/_model_remove:_" + str(modality_remove) + "/" # path to save the model
 
 
@@ -58,7 +58,7 @@ class Database_config():
     train_size = {}
     # size for each database
     # training set size
-    train_size["BRATS"] = 444 
+    train_size["BRATS"] = 444 #444 
     train_size["ATLAS"] = 459
     train_size["MSSEG"] = 37   # 37 
     train_size["ISLES"] =1   #19   # 19 

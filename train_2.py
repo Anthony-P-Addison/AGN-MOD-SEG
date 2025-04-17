@@ -137,7 +137,11 @@ def main (train_config,database_config,k_fold,args,channels_copy):
     # load data    
     train_loaders,val_loader,data_loader_map = get_dataloader(train_config, database_config,datasetlist, cropped_input_size , data_size,channels_copy,k_fold)
     # print('load WMH only for validation:')
-    ISLES_loader,ISLES_val_loader,data_laod = get_dataloader(train_config, database_config,["ISLES"], cropped_input_size , data_size,channels_copy,k_fold)
+    # Temporarily modify train_config to not drop FLAIR for WMH loading
+    original_modality_remove = train_config.modality_remove
+    train_config.modality_remove = None
+    WMH_loader,WMH_val_loader,data_laod = get_dataloader(train_config, database_config,["WMH"], cropped_input_size , data_size,channels_copy,k_fold)
+
     # initialize GPU
     print("Running on GPU:" + str(args.device_id))
     print("Running for epochs:" + str(epochs))
@@ -592,15 +596,17 @@ def main (train_config,database_config,k_fold,args,channels_copy):
                 IOU_metric.reset()
                 total_av_dice = list()
 
-                ################ I want to test isles as I go along to see how it does #######################
+                ################ I want to test WMH as I go along to see how it does #######################
                 
                 # Test with all modalities
-                for val_data in ISLES_val_loader["ISLES"]:
-                    
-                    channels['ISLES'] = [x if x != 'DWI' else 'invar' for x in channels['ISLES']]
+                for val_data in WMH_val_loader["WMH"]:
+
+                    channels['WMH'] = channels_copy['WMH']
+
+                    channels['WMH'] = [x if x != 'FLAIR' else 'invar' for x in channels['WMH']]
                      
-                    channel_map['ISLES'] = utils.map_channels(
-                        channels['ISLES'],
+                    channel_map['WMH'] = utils.map_channels(
+                        channels['WMH'],
                         total_modalities,
                         rand_assign=rand_assign_channels,
                     )
@@ -621,9 +627,9 @@ def main (train_config,database_config,k_fold,args,channels_copy):
                             )
                         )
                         if domain_invariant_slot:
-                            input_data[:, channel_map["ISLES"], :, :, :] = val_data[0]
+                            input_data[:, channel_map["WMH"], :, :, :] = val_data[0]
                         else:
-                            input_data[:, channel_map["ISLES"], :, :, :] = val_data[0]
+                            input_data[:, channel_map["WMH"], :, :, :] = val_data[0]
 
                     input_data = input_data.to(device)
                     label = val_data[1].to(device)
@@ -643,7 +649,7 @@ def main (train_config,database_config,k_fold,args,channels_copy):
                     sensitivity_metric(y_pred=val_outputs, y=label)
                     precision_metric(y_pred=val_outputs, y=label)
                     IOU_metric(y_pred=val_outputs, y=label)
-                metric["ISLES"] = {
+                metric["WMH"] = {
                     "dice": dice_metric.aggregate().item(),
                     "sensitivity": sensitivity_metric.aggregate()[0].item(),
                     "precision": precision_metric.aggregate()[0].item(),
@@ -653,18 +659,18 @@ def main (train_config,database_config,k_fold,args,channels_copy):
                 sensitivity_metric.reset()
                 precision_metric.reset()
                 IOU_metric.reset()
-                if metric["ISLES"]["dice"] > best_metric.get("ISLES", -1):
-                    best_metric["ISLES"] = metric["ISLES"]["dice"]
-                    best_metric_epoch["ISLES"] = epoch + 1
+                if metric["WMH"]["dice"] > best_metric.get("WMH", -1):
+                    best_metric["WMH"] = metric["WMH"]["dice"]
+                    best_metric_epoch["WMH"] = epoch + 1
                 print(
-                    "current epoch: {} current mean dice ISLES: {:.4f} best mean dice ISLES: {:.4f} at epoch {}".format(
+                    "current epoch: {} current mean dice WMH: {:.4f} best mean dice WMH: {:.4f} at epoch {}".format(
                         epoch + 1,
-                        metric["ISLES"]["dice"],
-                        best_metric["ISLES"],
-                        best_metric_epoch["ISLES"],
+                        metric["WMH"]["dice"],
+                        best_metric["WMH"],
+                        best_metric_epoch["WMH"],
                     )
                 )
-                total_av_dice.append(metric["ISLES"]["dice"])
+                total_av_dice.append(metric["WMH"]["dice"])
                 
                 # Test with only the invariant channel
                 dice_metric_invar = DiceMetric(include_background=True, reduction="mean")
@@ -672,7 +678,7 @@ def main (train_config,database_config,k_fold,args,channels_copy):
                 precision_metric_invar = ConfusionMatrixMetric(metric_name="precision", include_background=True)
                 IOU_metric_invar = MeanIoU(include_background=True)
                 
-                for val_data in ISLES_val_loader["ISLES"]:
+                for val_data in WMH_val_loader["WMH"]:
                     # Create input with only the invariant channel
                     input_data_invar = torch.from_numpy(
                         np.zeros(
@@ -689,16 +695,18 @@ def main (train_config,database_config,k_fold,args,channels_copy):
                     
                     # Find the invariant channel index
                     invar_channel_idx = None
-                    for i, modality in enumerate(channels['ISLES']):
+                    for i, modality in enumerate(channels['WMH']):
                         if modality == 'invar':
-                            invar_channel_idx = channel_map['ISLES'][i]
+                            invar_channel_idx = channel_map['WMH'][i]
+                            invar_id = invar_channel_idx
                             break
+                           
                     
-                    if invar_channel_idx is not None:
+                    if invar_id is not None:
                         # Copy only the invariant channel
-                        input_data_invar[:, invar_channel_idx, :, :, :] = val_data[0][:, i, :, :, :]
+                        input_data_invar[:, invar_id, :, :, :] = val_data[0][:, i, :, :, :]
                     else:
-                        print("Warning: No invariant channel found in ISLES data")
+                        print("Warning: No invariant channel found in WMH data")
                     
                     input_data_invar = input_data_invar.to(device)
                     label = val_data[1].to(device)
@@ -719,7 +727,7 @@ def main (train_config,database_config,k_fold,args,channels_copy):
                     precision_metric_invar(y_pred=val_outputs_invar, y=label)
                     IOU_metric_invar(y_pred=val_outputs_invar, y=label)
                 
-                metric["ISLES_invar"] = {
+                metric["WMH_invar"] = {
                     "dice": dice_metric_invar.aggregate().item(),
                     "sensitivity": sensitivity_metric_invar.aggregate()[0].item(),
                     "precision": precision_metric_invar.aggregate()[0].item(),
@@ -727,9 +735,9 @@ def main (train_config,database_config,k_fold,args,channels_copy):
                 }
                 
                 print(
-                    "current epoch: {} current mean dice ISLES (invar only): {:.4f}".format(
+                    "current epoch: {} current mean dice WMH (invar only): {:.4f}".format(
                         epoch + 1,
-                        metric["ISLES_invar"]["dice"],
+                        metric["WMH_invar"]["dice"],
                     )
                 )
                 
@@ -737,8 +745,8 @@ def main (train_config,database_config,k_fold,args,channels_copy):
                     wandb.log(
                         {
                             "epoch_val": epoch + 1,
-                            "mdice_ISLES": metric["ISLES"]["dice"],
-                            "mdice_ISLES_invar": metric["ISLES_invar"]["dice"],
+                            "mdice_WMH": metric["WMH"]["dice"],
+                            "mdice_WMH_invar": metric["WMH_invar"]["dice"],
                         }
                     )
                 ##########################################
@@ -893,7 +901,7 @@ if __name__ == "__main__":
     #########################
     args = parser.parse_args()
     args.device_id = 0
-    args.datasets = 'WMH_MSSEG_BRATS_ATLAS_TBI'   #'ISLES2022'
+    args.datasets = 'TBI_ISLES2022'   #'ISLES2022'
   
     ######################################
 

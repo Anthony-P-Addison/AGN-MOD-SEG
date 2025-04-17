@@ -210,7 +210,7 @@ def rand_set_channels_to_zero_with_invar(
                 else:
                     channel_add = random.sample(modalities_remaining, 1)
                     invar = batch_img[i,channel_add,:,:,:]
-            batch_img_da[i,[len(dataset_modalities)-1],:,:,:] = invar.to(torch.device("cpu"))
+            batch_img_da[i,[len(dataset_modalities)-1],:,:,:] = invar#.to(torch.device("cpu"))
         
         modalities_remain.append(modalities_remaining)
 
