@@ -138,7 +138,6 @@ def main (train_config,database_config,k_fold,args,channels_copy):
     train_loaders,val_loader,data_loader_map = get_dataloader(train_config, database_config,datasetlist, cropped_input_size , data_size,channels_copy,k_fold)
     # print('load WMH only for validation:')
     # Temporarily modify train_config to not drop FLAIR for WMH loading
-    original_modality_remove = train_config.modality_remove
     train_config.modality_remove = None
     WMH_loader,WMH_val_loader,data_laod = get_dataloader(train_config, database_config,["WMH"], cropped_input_size , data_size,channels_copy,k_fold)
 
@@ -263,12 +262,10 @@ def main (train_config,database_config,k_fold,args,channels_copy):
                 return 1.0
             elif 175 < current_epoch <= 250:
                 return 0.4
-            elif 250 < current_epoch <= 350:
-                return 0.1
-            elif 350 < current_epoch <= 550:
+            elif 250 < current_epoch <= 450:
                 return 0.1
             else:
-                return max(0.0, 0.1 - ((current_epoch - 550) / float(max(1, epochs - 550)))/5)
+                return max(0.0, 0.1 - (((current_epoch - 450) / float(max(1, epochs - 450)*0.1))))
                 #return max(0.0, 0.5 * (1.0 + math.cos(math.pi * (current_epoch - warmup_epochs) / max(1, args.E - warmup_epochs))))
         scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
 
@@ -672,7 +669,7 @@ def main (train_config,database_config,k_fold,args,channels_copy):
                 )
                 total_av_dice.append(metric["WMH"]["dice"])
                 
-                # Test with only the invariant channel
+                ##### Test with only the invariant channel   #####
                 dice_metric_invar = DiceMetric(include_background=True, reduction="mean")
                 sensitivity_metric_invar = ConfusionMatrixMetric(metric_name="sensitivity", include_background=True)
                 precision_metric_invar = ConfusionMatrixMetric(metric_name="precision", include_background=True)

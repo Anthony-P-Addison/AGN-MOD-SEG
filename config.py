@@ -7,13 +7,13 @@ class Training_config():
     workers:int = 2 # numworker
     train_batch_size: int = 6
     val_interval:int = 4 # the number of epochs between the validation   # 4 
-    lr_sched: bool = False
+    lr_sched: bool = True
     lr:float = 1e-4           
     model_type:str = "deep_unet"   #  deep_unet, old_unet
     cropped_input_size:tuple = (96,96,96) # (128, 128, 128)
     # lr_config
-    drop_learning_rate:bool = True
-    drop_learning_rate_epoch:int = 150 # 150 # epoch at which to decrease the learning rate
+    drop_learning_rate:bool = False
+    drop_learning_rate_epoch:int = 200 # 150 # epoch at which to decrease the learning rate
     drop_learning_rate_value:float = 1e-5
     # pre trained model:
     load_pre_trained_model:bool = False  # if true will load pre-train model  
