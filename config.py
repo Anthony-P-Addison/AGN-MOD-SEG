@@ -3,17 +3,17 @@ from pathlib import Path
 class Training_config():
 
     wandb_active:bool = True
-    epoch:int  = 600
+    epoch:int  = 800
     workers:int = 2 # numworker
     train_batch_size: int = 6
     val_interval:int = 4 # the number of epochs between the validation   # 4 
-    lr_sched: bool = True
+    lr_sched: bool = False
     lr:float = 1e-4           
     model_type:str = "deep_unet"   #  deep_unet, old_unet
     cropped_input_size:tuple = (96,96,96) # (128, 128, 128)
     # lr_config
-    drop_learning_rate:bool = False
-    drop_learning_rate_epoch:int = 200 # 150 # epoch at which to decrease the learning rate
+    drop_learning_rate:bool = True
+    drop_learning_rate_epoch:int = 500 # 150 # epoch at which to decrease the learning rate
     drop_learning_rate_value:float = 1e-5
     # pre trained model:
     load_pre_trained_model:bool = False  # if true will load pre-train model  
@@ -90,8 +90,8 @@ class Database_config():
         seg_path["BRATS"] = "data/BRATS/Labels"
     img_path["ATLAS"] = "data/ATLAS/Images"
     seg_path["ATLAS"] = "data/ATLAS/Labels"
-    img_path["ISLES2022"] = "data/ISLES_2022/Images"
-    seg_path["ISLES2022"] = "data/ISLES_2022/Labels"
+    img_path["ISLES2022"] = "data/ISLES2022/Images"
+    seg_path["ISLES2022"] = "data/ISLES2022/Labels"
     img_path["TUMOUR2"] = "data/TUMOUR2/Images"
     seg_path["TUMOUR2"] = "data/TUMOUR2/Labels"
 
@@ -120,6 +120,16 @@ class Database_config():
     val_size["ISLES2022"] = 75
     val_size["ISLES"] = 28   #28  #9
     val_size["TUMOUR2"] = 10
+
+    mask_path = {}
+    mask_path["BRATS"] = "data/BRATS/Masks"
+    mask_path["ATLAS"] = "data/ATLAS/Masks"
+    mask_path["MSSEG"] = "data/MSSEG/Masks"
+    mask_path["ISLES2022"] = "data/ISLES2022/Masks"
+    mask_path["TUMOUR2"] = "data/TUMOUR2/Masks"
+    mask_path["WMH"] = "data/WMH/Masks"
+    mask_path["VOETS2"] = "data/VOETS2/Masks"
+    mask_path["TBI"] = "data/TBI/Masks"
 
 
 class Test_config():

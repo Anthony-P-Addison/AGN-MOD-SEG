@@ -8,6 +8,8 @@ from monai.transforms import Transform
 import numpy as np
 from collections import defaultdict
 import nibabel as nib
+from monai.transforms import LoadImaged
+import torch
 
 
 class RemoveChannels(Transform):
@@ -33,11 +35,56 @@ class RemoveChannels(Transform):
         return img[channels_to_keep, ...]
 
 
+class ImageMaskDataset(ImageDataset):
+    """
+    Dataset that loads image, label, and mask files.
+    Extends ImageDataset to add mask support while keeping channel removal functionality.
+    """
+    def __init__(self, image_files, label_files, mask_files, transform=None, seg_transform=None, mask_transform=None, channels_to_remove=None):
+        # Store file lists
+        self.image_files = image_files
+        self.label_files = label_files
+        self.mask_files = mask_files
+        
+        # Initialize parent class with image and label files
+        super().__init__(image_files, label_files, transform=transform, seg_transform=seg_transform)
+        
+        if len(mask_files) != len(image_files):
+            raise ValueError(f"Got {len(mask_files)} masks but {len(image_files)} images")
+        
+        self.mask_transform = mask_transform
+        self.channels_to_remove = channels_to_remove
+
+    def __getitem__(self, index):
+        # Get image and label using parent class (which uses MONAI's optimized loading)
+        img, label = super().__getitem__(index)
+        
+        # Load mask directly using nibabel
+        mask_path = self.mask_files[index]
+        mask_nii = nib.load(str(mask_path))
+        mask = torch.from_numpy(mask_nii.get_fdata()).float()
+        
+        # Add channel dimension if needed
+        if len(mask.shape) == 3:  # If mask is [H, W, D]
+            mask = mask.unsqueeze(0)  # Make it [1, H, W, D]
+        
+        # # Apply channel removal if specified
+        # if self.channels_to_remove is not None:
+        #     channels_to_keep = [i for i in range(img.shape[0]) if i not in self.channels_to_remove]
+        #     img = img[channels_to_keep, ...]
+        
+        # Apply mask transform if specified
+        if self.mask_transform is not None:
+            mask = self.mask_transform(mask)
+        
+        return img, label, mask
+
 
 def create_dataloader(
     val_size: int,
     images: list[Path],
     segs: list[Path],
+    masks: list[Path],
     workers: int,
     train_batch_size: int,
     total_train_data_size: int,
@@ -55,7 +102,7 @@ def create_dataloader(
 
     # training and validaiton split and index
 
-    #k_fold
+    # k_fold
     if val_size == 0:
         raise ValueError(
             "Validation size must be greater than 0 for k-fold cross-validation."
@@ -70,13 +117,17 @@ def create_dataloader(
         val_segs = [segs[i] for i in val_indices]
 
     elif k_fold is None:
+        #images
         train_images = images[:-val_size]
         train_images = train_images * div + train_images[:rem]
         train_segs = segs[:-val_size]
         train_segs = train_segs * div + train_segs[:rem]
         val_images = images[-val_size:]
         val_segs = segs[-val_size:]
-
+        #masks
+        val_masks = masks[-val_size:]
+        train_masks = masks[:-val_size]
+        train_masks = train_masks * div + train_masks[:rem]
 
     # image augmentation through spatial cropping to size and by randomly rotating
 
@@ -99,33 +150,51 @@ def create_dataloader(
         ]
     )
 
+    mask_imtrans = Compose([RandSpatialCrop((cropped_input_size[0], cropped_input_size[1], cropped_input_size[2]), random_size=False),RandRotate90(prob=0.1, spatial_axes=(0, 2))])
+
     val_imtrans = Compose([EnsureChannelFirst(),RemoveChannels(channels_to_remove)])
     val_segtrans = Compose([EnsureChannelFirst()])
     # create a training data loader
-    
 
-    train_ds = ImageDataset(train_images, train_segs, transform=train_imtrans, seg_transform=seg_imtrans)
+    # train_ds = ImageDataset(
+    #     train_images, train_segs, transform=train_imtrans, seg_transform=seg_imtrans
+    # )
+
+    train_ds = ImageMaskDataset(
+    image_files=train_images,
+    label_files=train_segs,
+    mask_files=train_masks, 
+    transform=train_imtrans,
+    seg_transform=seg_imtrans,
+    mask_transform=mask_imtrans, 
+    channels_to_remove=channels_to_remove)
+
+
     ######################################################
     # Create a training data loader
     train_loader = DataLoader(train_ds, batch_size=train_batch_size, shuffle=True, num_workers=workers, pin_memory=0)
 
+    val_ds = ImageMaskDataset(
+    image_files=val_images,
+    label_files=val_segs,
+    mask_files=val_masks, # Need to gather these mask file paths
+    transform=val_imtrans,
+    seg_transform=val_segtrans,
+    mask_transform=mask_imtrans, # Define a transform for masks if needed
+    channels_to_remove=channels_to_remove
+)
+
     # create a validation data loader
-    val_ds = ImageDataset(
-        val_images,
-        val_segs,
-        transform=val_imtrans,
-        seg_transform=val_segtrans,
-        image_only=image_only,
-    )
+    # val_ds = ImageDataset(
+    #     val_images,
+    #     val_segs,
+    #     transform=val_imtrans,
+    #     seg_transform=val_segtrans,
+    #     image_only=image_only,
+    # )
     val_loader = DataLoader(val_ds, batch_size=1, num_workers=workers, pin_memory=0)
-    
+
     return train_loader, val_loader
-
-
-
-
-
-
 
 
 def get_dataloader(
@@ -146,14 +215,14 @@ def get_dataloader(
     data_loader_map = {}
     img_path = database_config.img_path
     seg_path = database_config.seg_path
-
+    mask_path = database_config.mask_path
     # get dataloader
     for dataset in datasetlist:
         print("Training: ", dataset)
         val_size = database_config.total_size[dataset] - database_config.train_size[dataset]
         images = sorted(glob(os.path.join(img_path[dataset], "*.*")))
         segs = sorted(glob(os.path.join(seg_path[dataset], "*.*")))
-
+        masks = sorted(glob(os.path.join(mask_path[dataset], "*.*")))
         # select channels to remove from the dataset in question.
         channels_to_remove = get_modalities_drop(dataset, channels_copy[dataset], train_config.modality_remove)
 
@@ -161,6 +230,7 @@ def get_dataloader(
             val_size=val_size,
             images=images,
             segs=segs,
+            masks=masks,
             workers=train_config.workers,
             train_batch_size=train_config.train_batch_size,
             total_train_data_size=data_size,
@@ -181,7 +251,7 @@ def get_dataloader(
 def get_modalities_drop(
     dataset: str, modalities_present: list[str], remove_modality: str
 ) -> list[int]:
-    """Get the modalities to drop from the image tensor"""
+    """Get the modalities to drop from the image tensor as list of integers"""
 
     if remove_modality is None:
         return None
@@ -239,10 +309,6 @@ def create_test_val_loader(
 
 
 ########################################################################
-
-
-
-
 
 
 if "__main__" == __name__:
