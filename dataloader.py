@@ -10,6 +10,7 @@ from collections import defaultdict
 import nibabel as nib
 from monai.transforms import LoadImaged
 import torch
+from monai.transforms import RandSpatialCropd, RandRotate90d
 
 
 class RemoveChannels(Transform):
@@ -38,46 +39,107 @@ class RemoveChannels(Transform):
 class ImageMaskDataset(ImageDataset):
     """
     Dataset that loads image, label, and mask files.
-    Extends ImageDataset to add mask support while keeping channel removal functionality.
+    Uses parent ImageDataset for image/label loading + initial transforms.
+    Then applies a dictionary-based augmentation pipeline for synchronized random transforms.
     """
-    def __init__(self, image_files, label_files, mask_files, transform=None, seg_transform=None, mask_transform=None, channels_to_remove=None):
-        # Store file lists
-        self.image_files = image_files
-        self.label_files = label_files
-        self.mask_files = mask_files
+    def __init__(self, image_files, label_files, mask_files, 
+                 transform=None, # Should be for initial img processing (EnsureChannelFirst, RemoveChannels)
+                 seg_transform=None, # Should be for initial lbl processing (EnsureChannelFirst)
+                 mask_transform=None, # For initial mask processing (EnsureChannelFirst)
+                 # channels_to_remove is not directly used if RemoveChannels is in initial `transform`
+                 init_crop_size=None, # Pass cropped_input_size here
+                 dict_aug_prob=0.1): # Probability for RandRotate90d, example
         
-        # Initialize parent class with image and label files
+        # Store file lists (mainly for mask loading)
+        self.image_files = image_files
+        self.label_files = label_files # Kept for consistency, though parent uses them
+        self.mask_files = mask_files
+
+        # Store the initial transform for the mask (e.g., EnsureChannelFirst)
+        self.initial_mask_transform = mask_transform
+        
+        # --- Define the dictionary-based augmentation pipeline --- 
+        dict_augmentations = []
+        if init_crop_size:
+            if not (isinstance(init_crop_size, (list, tuple)) and len(init_crop_size) == 3):
+                raise ValueError("init_crop_size must be a list or tuple of 3 integers.")
+            dict_augmentations.append(
+                RandSpatialCropd(keys=["image", "label", "mask"], roi_size=tuple(init_crop_size), random_size=False)
+            )
+        
+        dict_augmentations.append(
+            RandRotate90d(keys=["image", "label", "mask"], prob=dict_aug_prob, spatial_axes=(0, 2))
+        )
+        # Add other dictionary-based augmentations here if needed
+        self.dict_augment_pipeline = Compose(dict_augmentations)
+        
+        # Initialize parent class with image/label files and their *initial, non-random* transforms.
+        # These `transform` and `seg_transform` should NOT contain RandSpatialCrop/RandRotate90.
         super().__init__(image_files, label_files, transform=transform, seg_transform=seg_transform)
         
         if len(mask_files) != len(image_files):
             raise ValueError(f"Got {len(mask_files)} masks but {len(image_files)} images")
         
-        self.mask_transform = mask_transform
-        self.channels_to_remove = channels_to_remove
+        # self.channels_to_remove is not used by this class if RemoveChannels is in the initial `transform`.
 
     def __getitem__(self, index):
-        # Get image and label using parent class (which uses MONAI's optimized loading)
+        # 1. Get image and label from parent class.
+        # This applies the initial `transform` and `seg_transform` (e.g., EnsureChannelFirst, RemoveChannels).
         img, label = super().__getitem__(index)
         
-        # Load mask directly using nibabel
+        # 2. Load mask manually
         mask_path = self.mask_files[index]
-        mask_nii = nib.load(str(mask_path))
-        mask = torch.from_numpy(mask_nii.get_fdata()).float()
+        try:
+            mask_nii = nib.load(str(mask_path))
+            mask = torch.from_numpy(np.asarray(mask_nii.get_fdata(), dtype=np.float32))
+        except Exception as e:
+            print(f"Error loading mask file {mask_path} at index {index}: {e}")
+            raise IOError(f"Error loading mask NIfTI file: {mask_path}") from e
         
-        # Add channel dimension if needed
-        if len(mask.shape) == 3:  # If mask is [H, W, D]
-            mask = mask.unsqueeze(0)  # Make it [1, H, W, D]
+        # 3. Apply initial (non-random) transform to mask
+        # This should ensure the mask is a tensor and has a channel dimension (e.g., [C,H,W,D])
+        if self.initial_mask_transform is not None:
+            mask = self.initial_mask_transform(mask)
+        else: # Fallback if no initial_mask_transform provided
+            if mask.dim() == 3: mask = mask.unsqueeze(0) # Add channel dim if 3D
         
-        # # Apply channel removal if specified
-        # if self.channels_to_remove is not None:
-        #     channels_to_keep = [i for i in range(img.shape[0]) if i not in self.channels_to_remove]
-        #     img = img[channels_to_keep, ...]
+        # 4. Ensure all img, label, mask are 4D tensors [C,H,W,D] before dictionary transforms
+        # The initial transforms passed to super() and initial_mask_transform should handle this.
+        if not (isinstance(img, torch.Tensor) and img.ndim == 4):
+            if isinstance(img, torch.Tensor) and img.ndim == 3: img = img.unsqueeze(0) 
+            else: raise TypeError(f"Image at index {index} is not 3D or 4D tensor after initial_transform, shape: {img.shape if isinstance(img, torch.Tensor) else type(img)}")
         
-        # Apply mask transform if specified
-        if self.mask_transform is not None:
-            mask = self.mask_transform(mask)
+        if not (isinstance(label, torch.Tensor) and label.ndim == 4):
+            if isinstance(label, torch.Tensor) and label.ndim == 3: label = label.unsqueeze(0)
+            else: raise TypeError(f"Label at index {index} is not 3D or 4D tensor after initial_transform, shape: {label.shape if isinstance(label, torch.Tensor) else type(label)}")
+
+        if not (isinstance(mask, torch.Tensor) and mask.ndim == 4):
+            if isinstance(mask, torch.Tensor) and mask.ndim == 3: mask = mask.unsqueeze(0)
+            else: raise TypeError(f"Mask at index {index} is not 3D or 4D tensor after initial_mask_transform, shape: {mask.shape if isinstance(mask, torch.Tensor) else type(mask)}")
+
+        # Ensure contiguity before putting into the dictionary for augmentation
+        if isinstance(img, torch.Tensor): img = img.contiguous()
+        if isinstance(label, torch.Tensor): label = label.contiguous()
+        if isinstance(mask, torch.Tensor): mask = mask.contiguous()
+
+        # 5. Create dictionary and apply dictionary-based augmentation pipeline
+        data_dict = {"image": img, "label": label, "mask": mask}
         
-        return img, label, mask
+        try:
+            augmented_data_dict = self.dict_augment_pipeline(data_dict)
+        except Exception as e:
+            print(f"Error during dictionary augmentation for sample at index {index}: {e}")
+            print(f"Data shapes before error: img: {img.shape}, label: {label.shape}, mask: {mask.shape}")
+            # Include dtypes as well, as they can sometimes be relevant
+            print(f"Data dtypes before error: img: {img.dtype}, label: {label.dtype}, mask: {mask.dtype}")
+            raise RuntimeError(f"Dictionary augmentation pipeline failed at index {index}") from e
+
+        # 6. Extract augmented tensors
+        aug_img = augmented_data_dict["image"]
+        aug_label = augmented_data_dict["label"]
+        aug_mask = augmented_data_dict["mask"]
+        
+        return aug_img, aug_label, aug_mask
 
 
 def create_dataloader(
@@ -135,22 +197,22 @@ def create_dataloader(
         [
             EnsureChannelFirst(strict_check=True),
             RemoveChannels(channels_to_remove),
-            RandSpatialCrop((cropped_input_size[0], cropped_input_size[1], cropped_input_size[2]), random_size=False),
+            #RandSpatialCrop((cropped_input_size[0], cropped_input_size[1], cropped_input_size[2]), random_size=False),
             # RandCropByPosNegLabel((cropped_input_size[0], cropped_input_size[1], cropped_input_size[2]),label=train_segs),
-            RandRotate90(prob=0.1, spatial_axes=(0, 2)),
+            #RandRotate90(prob=0.1, spatial_axes=(0, 2)),
         ]
     )
 
     seg_imtrans = Compose(
         [
             EnsureChannelFirst(strict_check=True),
-            RandSpatialCrop((cropped_input_size[0], cropped_input_size[1], cropped_input_size[2]), random_size=False),
+            #RandSpatialCrop((cropped_input_size[0], cropped_input_size[1], cropped_input_size[2]), random_size=False),
             # RandCropByPosNegLabel((cropped_input_size[0], cropped_input_size[1], cropped_input_size[2]),label=train_segs),
-            RandRotate90(prob=0.1, spatial_axes=(0, 2)),
+            #RandRotate90(prob=0.1, spatial_axes=(0, 2)),
         ]
     )
 
-    mask_imtrans = Compose([RandSpatialCrop((cropped_input_size[0], cropped_input_size[1], cropped_input_size[2]), random_size=False),RandRotate90(prob=0.1, spatial_axes=(0, 2))])
+    #mask_imtrans = Compose([RandSpatialCrop((cropped_input_size[0], cropped_input_size[1], cropped_input_size[2]), random_size=False),RandRotate90(prob=0.1, spatial_axes=(0, 2))])
 
     val_imtrans = Compose([EnsureChannelFirst(),RemoveChannels(channels_to_remove)])
     val_segtrans = Compose([EnsureChannelFirst()])
@@ -166,8 +228,10 @@ def create_dataloader(
     mask_files=train_masks, 
     transform=train_imtrans,
     seg_transform=seg_imtrans,
-    mask_transform=mask_imtrans, 
-    channels_to_remove=channels_to_remove)
+    init_crop_size=cropped_input_size,
+    )
+    #mask_transform=mask_imtrans, 
+    #channels_to_remove=channels_to_remove)
 
 
     ######################################################
@@ -180,9 +244,9 @@ def create_dataloader(
     mask_files=val_masks, # Need to gather these mask file paths
     transform=val_imtrans,
     seg_transform=val_segtrans,
-    mask_transform=mask_imtrans, # Define a transform for masks if needed
-    channels_to_remove=channels_to_remove
-)
+    init_crop_size = cropped_input_size)
+    #mask_transform=mask_imtrans, # Define a transform for masks if needed
+    #channels_to_remove=channels_to_remove)
 
     # create a validation data loader
     # val_ds = ImageDataset(
