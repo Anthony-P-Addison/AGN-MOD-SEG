@@ -3,12 +3,12 @@ from pathlib import Path
 class Training_config():
 
     wandb_active:bool = True
-    epoch:int  = 800
+    epoch:int  = 600
     workers:int = 2 # numworker
-    train_batch_size: int = 6
+    train_batch_size: int = 6   # 4 
     val_interval:int = 4 # the number of epochs between the validation   # 4 
     lr_sched: bool = False
-    lr:float = 1e-4           
+    lr:float =  1e-4 #5e-5   # increased to 3x the size of the original lr          
     model_type:str = "deep_unet"   #  deep_unet, old_unet
     cropped_input_size:tuple = (96,96,96) # (128, 128, 128)
     # lr_config
@@ -24,6 +24,7 @@ class Training_config():
     ######### slot allocation #############
     domain_invariant_slot:bool = True
 
+    contrast_augmentation: bool = True
     mixup :bool = False
     gin_mix = False
     gin_ipa: str = 'GIN_IPA'   # gin
@@ -55,6 +56,7 @@ class Database_config():
     channels["TBI"] = ["FLAIR", "T1", "T2", "SWI"]
     channels["ISLES2022"] = ['ADC','DWI','FLAIR'] 
     channels["TUMOUR2"]  = ['T1']
+    channels['VSCH'] = ['FLAIR','T1','T2']  
     train_size = {}
     # size for each database
     # training set size
@@ -137,7 +139,7 @@ class Test_config():
     save_path:Path = "save_segs/"  # save niftis generated
     model_file_path:Path = 'models/Mixup/_model_remove:_None/ATLAS_MSSEG_TBI_BRATS_WMH/2025-02-15_19-10/Mixup_random_drop_TrueATLAS_MSSEG_TBI_BRATS_WMH2025-02-15_19-10_BEST_AVERAGE.pth'#'models/Mixup/_model_remove:_FLAIR/MSSEG_BRATS_ATLAS_TBI_ISLES/2025-02-04_23-08/Mixup_random_drop_TrueMSSEG_BRATS_ATLAS_TBI_ISLES2025-02-04_23-08_BEST_AVERAGE.pth'  #models/new_test_BRATS_ATLAS_WMH_MSSEG_TBI_random_drop_0_Epoch_599.pth' #'models/Train_BRATS_TBI_ATLAS_MSSEG_WMH.pth' # "models/new_test_BRATS_ATLAS_WMH_MSSEG_TBI_random_drop_0_checkpoint_Epoch_599.pt"  # "models/MSSEG/_random_drop_0_2024-12-04_16-15_checkpoint_Epoch_99.pt" #"models/MSSEG/rand_slot_allocation_random_drop_0_2024-12-09_16-01_checkpoint_Epoch_99.pt"
     model_net_type: str = "unet_deep"    # 'unet_old', 'unet_deep' # the type of the pre-train model
-    num_modalities_trained_on: int = 7 # the number of modalities included in training
+    num_modalities_trained_on: int = 6 # the number of modalities included in training
     #: dict[str,list[int]] = {"VOETS2":[3,5,4],"BRATS":[1,3,4,5], "ATLAS":[3], "MSSEG":[1,3,4,5,0], "ISLES":[1,3,5,0], "TBI":[1,3,5,2], "WMH":[1,3]} #The allocated channel index of the modalities(each channel) in the testing databases (start from 0) For example "ATLAS": [3] means the T1 modality in ATLAS will be allocated to the forth channel "VOETS2":[1,5],
     
     # Slot allocation
@@ -146,7 +148,7 @@ class Test_config():
     single_slot:bool = False
     modality_remove:str = None #'FLAIR'     #'T1'   # Modlality completed removed during test in dataloader. 
 
-    modality_rem_train: str = 'DWI' # 'DWI' # the modality that was removed during training and now want to test in the invariant slot. 
+    modality_rem_train: str = 'FLAIR' # 'DWI' # the modality that was removed during training and now want to test in the invariant slot. 
 
 
 

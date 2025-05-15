@@ -32,7 +32,7 @@ class ModelTester:
         self.database_config = config.Database_config()
         self.test_config = config.Test_config()
         self.rand_assign = self.test_config.rand_assign
-        self.cropped_input_size = [128, 128, 128]
+        self.cropped_input_size = [96, 96, 96]     # make sure this is the same as crop size used during training.
         self.img_index = 0
         self.label_index = 1
         self.total_modalities = set()
@@ -256,26 +256,21 @@ if __name__ == "__main__":
 
     ####################
 
-    args.datasets_to_test = 'ISLES' #'TBI' # dataset for testing
-    args.modalities_to_test ="0_1_2_3"       # numeric order of modalities
-    args.test_all_combinations = 1
+    args.datasets_to_test = 'ISLES'  ###'WMH' #'TBI' # dataset for testing
+    args.modalities_to_test ="1_2_3"       # numeric order of modalities
+    args.test_all_combinations = 0
     args.device_id = 0
-    args.trained_on = 'WMH_MSSEG_BRATS_ATLAS_TBI'    # The datasets the model was trained on
+    args.trained_on = "ISLES2022_TBI" #DATASETS the model was trained on
     #########################
 
-    checkpoint1 = ['models/Mixup/_model_remove:_None/WMH_MSSEG_BRATS_ATLAS_TBI/2025-04-02_19-41/Mixup_random_drop_True_2025-04-02_19-41_Epoch_199.pth']
-    #['models/all_in_one/_model_remove:_None/TBI/2025-02-13_21-31/all_in_one_random_drop_False_2025-02-13_21-31_Epoch_599.pth']
-
-
+    checkpoint1 = ['models/WMH_PRELIM_TEST/_model_remove:_FLAIR/TBI_ISLES2022/2025-05-05_12-19/WMH_PRELIM_TEST_random_drop_True_2025-05-05_12-19_Epoch_599.pth']
 
     for file in checkpoint1:
-
         tester = ModelTester(args,file)
         x=tester.run()
     
 
 
-    
-# msse - 0.5438 after 240 epochs 
+
 
 

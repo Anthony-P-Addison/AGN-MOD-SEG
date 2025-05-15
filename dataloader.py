@@ -34,9 +34,100 @@ class RemoveChannels(Transform):
             return img
         channels_to_keep = [i for i in range(img.shape[0]) if i not in self.channels_to_remove]
         return img[channels_to_keep, ...]
+    
+# def create_dataloader(
+#     val_size: int,
+#     images: list[Path],
+#     segs: list[Path],
+#     workers: int,
+#     train_batch_size: int,
+#     total_train_data_size: int,
+#     current_train_data_size: int,
+#     cropped_input_size: list,
+#     channels_to_remove: list,
+#     k_fold: dict,
+#     image_only: bool = False,
+# ) -> None:
+#     """Create monai wrapped dataloaders for training and validation data"""
+
+#     if k_fold is None:
+#         div = total_train_data_size//current_train_data_size
+#         rem = total_train_data_size%current_train_data_size
+
+#     # training and validaiton split and index
+
+#     #k_fold
+#     if val_size == 0:
+#         raise ValueError(
+#             "Validation size must be greater than 0 for k-fold cross-validation."
+#         )
+
+#     if k_fold is not None:
+#         train_indices = k_fold["train"]
+#         val_indices = k_fold["val"]
+#         train_images = [images[i] for i in train_indices]
+#         train_segs = [segs[i] for i in train_indices]
+#         val_images = [images[i] for i in val_indices]
+#         val_segs = [segs[i] for i in val_indices]
+
+#     elif k_fold is None:
+#         train_images = images[:-val_size]
+#         train_images = train_images * div + train_images[:rem]
+#         train_segs = segs[:-val_size]
+#         train_segs = train_segs * div + train_segs[:rem]
+#         val_images = images[-val_size:]
+#         val_segs = segs[-val_size:]
 
 
-class ImageMaskDataset(ImageDataset):
+#     # image augmentation through spatial cropping to size and by randomly rotating
+
+#     train_imtrans = Compose(
+#         [
+#             EnsureChannelFirst(strict_check=True),
+#             RemoveChannels(channels_to_remove),
+#             RandSpatialCrop((cropped_input_size[0], cropped_input_size[1], cropped_input_size[2]), random_size=False),
+#             # RandCropByPosNegLabel((cropped_input_size[0], cropped_input_size[1], cropped_input_size[2]),label=train_segs),
+#             RandRotate90(prob=0.1, spatial_axes=(0, 2)),
+#         ]
+#     )
+
+#     seg_imtrans = Compose(
+#         [
+#             EnsureChannelFirst(strict_check=True),
+#             RandSpatialCrop((cropped_input_size[0], cropped_input_size[1], cropped_input_size[2]), random_size=False),
+#             # RandCropByPosNegLabel((cropped_input_size[0], cropped_input_size[1], cropped_input_size[2]),label=train_segs),
+#             RandRotate90(prob=0.1, spatial_axes=(0, 2)),
+#         ]
+#     )
+
+#     val_imtrans = Compose([EnsureChannelFirst(),RemoveChannels(channels_to_remove)])
+#     val_segtrans = Compose([EnsureChannelFirst()])
+#     # create a training data loader
+    
+
+#     train_ds = ImageDataset(train_images, train_segs, transform=train_imtrans, seg_transform=seg_imtrans)
+#     ######################################################
+#     # Create a training data loader
+#     train_loader = DataLoader(train_ds, batch_size=train_batch_size, shuffle=True, num_workers=workers, pin_memory=0)
+
+#     # create a validation data loader
+#     val_ds = ImageDataset(
+#         val_images,
+#         val_segs,
+#         transform=val_imtrans,
+#         seg_transform=val_segtrans,
+#         image_only=image_only,
+#     )
+#     val_loader = DataLoader(val_ds, batch_size=1, num_workers=workers, pin_memory=0)
+    
+#     return train_loader, val_loader
+    
+
+
+
+
+
+class TrainImageMaskDataset(ImageDataset):
     """
     Dataset that loads image, label, and mask files.
     Uses parent ImageDataset for image/label loading + initial transforms.
@@ -80,7 +171,6 @@ class ImageMaskDataset(ImageDataset):
         if len(mask_files) != len(image_files):
             raise ValueError(f"Got {len(mask_files)} masks but {len(image_files)} images")
         
-        # self.channels_to_remove is not used by this class if RemoveChannels is in the initial `transform`.
 
     def __getitem__(self, index):
         # 1. Get image and label from parent class.
@@ -212,17 +302,18 @@ def create_dataloader(
         ]
     )
 
-    #mask_imtrans = Compose([RandSpatialCrop((cropped_input_size[0], cropped_input_size[1], cropped_input_size[2]), random_size=False),RandRotate90(prob=0.1, spatial_axes=(0, 2))])
 
     val_imtrans = Compose([EnsureChannelFirst(),RemoveChannels(channels_to_remove)])
+    
     val_segtrans = Compose([EnsureChannelFirst()])
+
     # create a training data loader
 
     # train_ds = ImageDataset(
     #     train_images, train_segs, transform=train_imtrans, seg_transform=seg_imtrans
     # )
 
-    train_ds = ImageMaskDataset(
+    train_ds = TrainImageMaskDataset(
     image_files=train_images,
     label_files=train_segs,
     mask_files=train_masks, 
@@ -238,24 +329,25 @@ def create_dataloader(
     # Create a training data loader
     train_loader = DataLoader(train_ds, batch_size=train_batch_size, shuffle=True, num_workers=workers, pin_memory=0)
 
-    val_ds = ImageMaskDataset(
-    image_files=val_images,
-    label_files=val_segs,
-    mask_files=val_masks, # Need to gather these mask file paths
-    transform=val_imtrans,
-    seg_transform=val_segtrans,
-    init_crop_size = cropped_input_size)
-    #mask_transform=mask_imtrans, # Define a transform for masks if needed
-    #channels_to_remove=channels_to_remove)
+    # val_ds = ImageDataset(
+    # image_files=val_images,
+    # label_files=val_segs,
+    # mask_files=val_masks, # Need to gather these mask file paths
+    # transform=val_imtrans,
+    # seg_transform=val_segtrans,
+    # init_crop_size = cropped_input_size)
+    # #mask_transform=mask_imtrans, # Define a transform for masks if needed
+    # #channels_to_remove=channels_to_remove)
+
 
     # create a validation data loader
-    # val_ds = ImageDataset(
-    #     val_images,
-    #     val_segs,
-    #     transform=val_imtrans,
-    #     seg_transform=val_segtrans,
-    #     image_only=image_only,
-    # )
+    val_ds = ImageDataset(
+        val_images,
+        val_segs,
+        transform=val_imtrans,
+        seg_transform=val_segtrans,
+        image_only=image_only,
+    )
     val_loader = DataLoader(val_ds, batch_size=1, num_workers=workers, pin_memory=0)
 
     return train_loader, val_loader

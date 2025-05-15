@@ -6,7 +6,7 @@ from itertools import combinations
 import nibabel as nib
 from monai.transforms import  Compose,EnsureChannelFirst
 from monai.data import ImageDataset, DataLoader
-from augment_utils import mixup1_augmentation, mixup_data_causality
+from augment_utils import mixup1_augmentation, mixup_data_causality, spatial_contrast_aug
 
 
 def map_channels(dataset_channels: list[str], total_modalities: list[str],rand_assign: bool,) -> list[int]:
@@ -40,95 +40,75 @@ def rand_set_channels_to_zero(dataset_modalities: list, batch_img_data: torch.Te
     return modalities_remaining, batch_img_data
 
 
+
+def map_combinations(dataset_modalities: list):
+    """Map combinations of modalities to the batch data"""
+    # Create all possible combinations of modalities (at least one modality must remain)
+    all_combinations = []
+    for r in range(1, len(dataset_modalities) + 1):
+        combos = list(combinations(range(len(dataset_modalities)), r))
+        # Convert each combination tuple to a list with no commas
+        for combo in combos:
+            all_combinations.append(list(combo))
+    
+    return all_combinations
+
+
+
+
 def rand_set_channels_to_zero_with_invar(
     dataset_modalities: list,
     batch_img_data: torch.Tensor,
+    mask_data: torch.Tensor,
     domain_invariant: bool,
     mixup: bool = False,
     gin_mix: bool = False,
     gin_ipa: str = None,
+    contrast_augmentation: bool = False,
     batch_label_data: torch.Tensor = None,
     device_id: str = None,
+    combination_map: list = None,
 ) -> tuple[list[int], torch.Tensor]:
-    """Randomly set channels to zero and handle invariant channel with optional augmentations
-    Args:
-        dataset_modalities: List of modalities in the dataset
-        batch_img_data: Input image batch [B, C, H, W, D]
-        domain_invariant: Whether to use invariant channel
-        mixup: Whether to use mixup augmentation
-        gin_mix: Whether to use GIN augmentation
-        gin_ipa: Type of GIN/IPA augmentation
-        batch_label_data: Labels for supervised augmentation
-        device_id: Device for GIN augmentation
-    Returns:
-        tuple: (list of remaining modalities, augmented batch)
-    """
+    """Randomly set channels to zero and handle invariant channel with optional augmentations"""
     modalities_remain = []
-    
-   
-    batch_img_da = batch_img_data
+    # Keep original data for augmentations
+    original_batch = batch_img_data.clone()
+    # Working copy for modifications
+    working_batch = batch_img_data.clone()
 
-    for i in range(batch_img_da.shape[0]):   
+    if domain_invariant:
+        # append invariant channel
+        working_batch = torch.cat((working_batch, torch.zeros((working_batch.shape[0], 1, working_batch.shape[2], working_batch.shape[3], working_batch.shape[4]))),dim=1)
+        original_batch = torch.cat((original_batch, torch.zeros((original_batch.shape[0], 1, original_batch.shape[2], original_batch.shape[3], original_batch.shape[4]))),dim=1)
+
+    for i in range(working_batch.shape[0]):   
         # Uniform dropout probability for all cases
-        probs = None
-        prob_of_invar = False
+        # number_of_dropped_modalities = np.random.randint(0, len(dataset_modalities))
+        # modalities_dropped = random.sample(
+        #     list(np.arange(len(dataset_modalities))),
+        #     number_of_dropped_modalities,
+        # )
+        # modalities_dropped.sort()
 
-        # standard add of invar with random dropout
-        if probs is None:
-            number_of_dropped_modalities = np.random.randint(0, len(dataset_modalities))
+        modalities_remaining = random.choice(combination_map)
+        modalities_dropped = list(set(np.arange(len(dataset_modalities))) - set(modalities_remaining))
 
-            modalities_dropped = random.sample(
-            list(np.arange(len(dataset_modalities))),
-            number_of_dropped_modalities,)
-
-            modalities_dropped.sort()
-
-            if domain_invariant:
-                # append invariant channel
-                batch_img_da = torch.cat((batch_img_data, torch.zeros((batch_img_data.shape[0], 1, batch_img_data.shape[2], batch_img_data.shape[3], batch_img_data.shape[4]))),dim=1)
+    
+        # Apply dropout and verify
+        working_batch[i,modalities_dropped,:,:,:] = 0
         
-            
-            # Apply dropout
-            batch_img = batch_img_da.clone()
-            batch_img_da[i,modalities_dropped,:,:,:] = 0
-            
-            modalities_remaining = sorted(
-                set(np.arange(len(dataset_modalities)-1)) - set(modalities_dropped))
+        # Verify dropped modalities are actually zero
+        for mod in modalities_dropped:
+            if not torch.all(working_batch[i,mod,:,:,:] == 0):
+                print(f"Warning: Modality {mod} was not properly zeroed")
+                working_batch[i,mod,:,:,:] = 0  # Force zero if not already zero
+        
+        # modalities_remaining = sorted(
+        #     set(np.arange(len(dataset_modalities))) - set(modalities_dropped))
      
-
-
-        # manual add and drop of of invar 
-        else:
-            number_of_dropped_modalities = np.random.randint(0, len(dataset_modalities)-1) # okay as invar appended already
-
-            # Random sampling for all dataset sizes
-            modalities_dropped = random.sample(
-                list(np.arange(len(dataset_modalities)-1)),
-                number_of_dropped_modalities,
-            )
-      
-        
-            modalities_dropped.sort()
-            
-            # Apply dropout
-            batch_img = batch_img_da.clone()
-            batch_img_da[i,modalities_dropped,:,:,:] = 0
-            
-            modalities_remaining = sorted(
-                set(np.arange(len(dataset_modalities)-1)) - set(modalities_dropped)
-            )
-
-            if domain_invariant:
-                # append invariant channel
-                batch_img_da = torch.cat((batch_img_data, torch.zeros((batch_img_data.shape[0], 1, batch_img_data.shape[2], batch_img_data.shape[3], batch_img_data.shape[4]))),dim=1)
-        
-            prob_of_invar= random.random() < 0.375
-        
-
         # Handle invariant channel with augmentations
-        if domain_invariant and (prob_of_invar or probs==None)  and len(dataset_modalities) > 2:  # Match average modality presence can change to how often want to add info to invariant channel
+        if domain_invariant and len(dataset_modalities) > 2:
             invar = None
-
           
             if mixup:
                 # Mixup augmentation logic
@@ -136,7 +116,7 @@ def rand_set_channels_to_zero_with_invar(
                     # Mix two remaining channels
                     channels = random.sample(modalities_remaining, 2)
                     invar = mixup1_augmentation(
-                        batch_img[i, channels, :, :],
+                        original_batch[i, channels, :, :],
                         all_mod_dropped=False,
                         one_mod_dropped=False,
                         two_not_dropped=True,
@@ -146,7 +126,7 @@ def rand_set_channels_to_zero_with_invar(
                     # Mix one dropped with one remaining
                     channels = random.sample(modalities_remaining, 1) + random.sample(modalities_dropped, 1)
                     invar = mixup1_augmentation(
-                        batch_img[i, channels, :, :],
+                        original_batch[i, channels, :, :],
                         all_mod_dropped=False,
                         one_mod_dropped=True,
                         two_not_dropped=False,
@@ -156,7 +136,7 @@ def rand_set_channels_to_zero_with_invar(
                     # Mix two dropped channels
                     channels = random.sample(modalities_dropped, 2)
                     invar = mixup1_augmentation(
-                        batch_img[i, channels, :, :],
+                        original_batch[i, channels, :, :],
                         all_mod_dropped=True,
                         one_mod_dropped=False,
                         two_not_dropped=False,
@@ -166,7 +146,7 @@ def rand_set_channels_to_zero_with_invar(
                     # Mix three dropped channels
                     channels = random.sample(modalities_dropped, 3)
                     invar = mixup1_augmentation(
-                        batch_img[i, channels, :, :],
+                        original_batch[i, channels, :, :],
                         all_mod_dropped=False,
                         one_mod_dropped=False,
                         two_not_dropped=False,
@@ -179,7 +159,7 @@ def rand_set_channels_to_zero_with_invar(
                     # Augment one remaining channel
                     channel = random.sample(modalities_remaining, 1)
                     invar = mixup_data_causality(
-                        batch_img[i, channel, :, :],
+                        original_batch[i, channel, :, :],
                         device_id=device_id,
                         aug_type=gin_ipa,
                         all_mod_dropped=False,
@@ -191,31 +171,111 @@ def rand_set_channels_to_zero_with_invar(
                     # Augment one dropped channel
                     channel = random.sample(modalities_dropped, 1)
                     invar = mixup_data_causality(
-                        batch_img[i, channel, :, :],
+                        original_batch[i, channel, :, :],
                         device_id=device_id,
                         aug_type=gin_ipa,
                         all_mod_dropped=True,
                         one_mod_dropped=False,
                         two_not_dropped=False,
                         mod_3=False
-                )
+                    )
                     
-            ######## TODO:ADD MORE AUGMENTATTIONS HERE WITH A NEW SWITCH FOR THE INVAR CHANNEL##########
+            elif contrast_augmentation:
+                random_number = random.random()
+                
+                # number below is probability of not using augmentations
+                if random_number < 0.25:
+                    invar = None   
+                else:
+                    pathology_label = batch_label_data[i,0,:,:,:]
+                    brain_mask = mask_data[i,0,:,:,:] 
+
+                    if len(modalities_dropped) > 0 and modalities_dropped[-1] == (len(dataset_modalities)-1):
+                        invar = original_batch[i,modalities_dropped[-1],:,:,:]
+                    elif len(modalities_dropped) > 0:
+                        channel_add = random.sample(modalities_dropped, 1)
+                        if original_batch[i,channel_add,:,:,:].any():
+                            invar = spatial_contrast_aug(channel_add,pathology_label,brain_mask,original_batch[i,:,:,:])
+                
+                    else:
+                        channel_add = random.sample(modalities_remaining, 1)
+                        invar = spatial_contrast_aug(channel_add,pathology_label,brain_mask,original_batch[i,:,:,:])
+
         
-            # If no augmentation or augmentation failed, use simple channel copy (of droppepd_channels)
-            elif invar is None: 
-                if len(modalities_dropped) > 0:
+            ######## TODO:ADD MORE AUGMENTATTIONS HERE WITH A NEW SWITCH  - FOR THE INVAR CHANNEL AS APPROPTIATE##########
+        
+            # just simple add of dropped modalities no augs. 
+            if invar is None: 
+               
+                if len(modalities_dropped) > 0 and modalities_dropped[-1] == (len(dataset_modalities)-1):
+                    invar = original_batch[i,modalities_dropped[-1],:,:,:]
+                elif len(modalities_dropped) > 0:
                     channel_add = random.sample(modalities_dropped, 1)
-                    invar = batch_img[i,channel_add,:,:,:]
+                    invar = original_batch[i,channel_add,:,:,:]
                 else:
                     channel_add = random.sample(modalities_remaining, 1)
-                    invar = batch_img[i,channel_add,:,:,:]
-            batch_img_da[i,[len(dataset_modalities)-1],:,:,:] = invar#.to(torch.device("cpu"))
-        
+                    invar = original_batch[i,channel_add,:,:,:]
+
+            # Set invariant channel and verify dropped modalities are still zero
+            working_batch[i,[len(dataset_modalities)-1],:,:,:] = invar
+            
+            # Final verification of dropped modalities
+            for mod in modalities_dropped:
+                if not torch.all(working_batch[i,mod,:,:,:] == 0):
+                    print(f"Warning: Modality {mod} was not zero after invariant channel processing")
+                    working_batch[i,mod,:,:,:] = 0  # Force zero if not already zero
+            
         modalities_remain.append(modalities_remaining)
 
+    ##### --- Track modalities used for training (not dropped) ---##########
+
+    # # Initialize counters if they don't exist
+    # if not hasattr(rand_set_channels_to_zero_with_invar, 'modality_used_counter'):
+    #     rand_set_channels_to_zero_with_invar.modality_used_counter = {}
+    #     rand_set_channels_to_zero_with_invar.total_iterations = 0
+
+    # if not hasattr(rand_set_channels_to_zero_with_invar, 'combination_used_counter'):
+    #     rand_set_channels_to_zero_with_invar.combination_used_counter = {}
+
+    # # Increment total iterations
+    # rand_set_channels_to_zero_with_invar.total_iterations += 1
+
+    # # Count used modalities and combinations
+    # for i, modalities in enumerate(modalities_remain):
+    #     # Individual modality usage
+    #     for mod_idx in modalities:
+    #         mod_name = dataset_modalities[mod_idx]
+    #         if mod_name not in rand_set_channels_to_zero_with_invar.modality_used_counter:
+    #             rand_set_channels_to_zero_with_invar.modality_used_counter[mod_name] = 0
+    #         rand_set_channels_to_zero_with_invar.modality_used_counter[mod_name] += 1
+
+    #     # Combination usage
+    #     used_mods = [dataset_modalities[j] for j in sorted(modalities)]
+    #     combo_str = '+'.join(used_mods) if used_mods else 'None'
+    #     if combo_str not in rand_set_channels_to_zero_with_invar.combination_used_counter:
+    #         rand_set_channels_to_zero_with_invar.combination_used_counter[combo_str] = 0
+    #     rand_set_channels_to_zero_with_invar.combination_used_counter[combo_str] += 1
+
+    # # Print statistics every 10 iterations
+    # if rand_set_channels_to_zero_with_invar.total_iterations % 30 == 0:
+    #     total_samples = rand_set_channels_to_zero_with_invar.total_iterations * batch_img_data.shape[0]
+
+    #     print(f"\n--- Modality Used Statistics (after {rand_set_channels_to_zero_with_invar.total_iterations} iterations) ---")
+    #     for mod_name, count in rand_set_channels_to_zero_with_invar.modality_used_counter.items():
+    #         use_percentage = (count / total_samples) * 100
+    #         print(f"  {mod_name}: used {count} times ({use_percentage:.2f}%)")
+    #     print("---------------------------------------------------\n")
+
+    #     print(f"--- Used Modality Combinations (after {rand_set_channels_to_zero_with_invar.total_iterations} iterations) ---")
+    #     print(f"{'Combination':<30} | {'Count':<10}")
+    #     print("-" * 45)
+    #     for combo, count in sorted(rand_set_channels_to_zero_with_invar.combination_used_counter.items(), key=lambda x: -x[1]):
+    #         print(f"{combo:<30} | {count:<10}")
+    #     print("---------------------------------------------------\n")
+
+    #############################################################################
     
-    return modalities_remain, batch_img_da
+    return modalities_remain, working_batch
 
 
 def single_slot( batch_img_data: torch.Tensor):

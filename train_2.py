@@ -38,6 +38,7 @@ def main (train_config,database_config,k_fold,args,channels_copy):
     wandb_active = train_config.wandb_active
     mixup = train_config.mixup
     gin_mix = train_config.gin_mix
+    contrast_augmentation = train_config.contrast_augmentation
     lr_sched = train_config.lr_sched
    
    
@@ -57,13 +58,14 @@ def main (train_config,database_config,k_fold,args,channels_copy):
     
 
     # create save model path. If the path does not exist, create it
-    now = datetime.datetime.now()
-    date = now.strftime("%Y-%m-%d_%H-%M")
-    model_save_path = os.path.join(train_config.model_save_path, args.datasets + "/" + date + "/")
-    if not os.path.exists(
-       model_save_path
-    ):
-        os.makedirs(model_save_path)
+    if wandb_active:
+        now = datetime.datetime.now()
+        date = now.strftime("%Y-%m-%d_%H-%M")
+        model_save_path = os.path.join(train_config.model_save_path, args.datasets + "/" + date + "/")
+        if not os.path.exists(
+        model_save_path
+        ):
+            os.makedirs(model_save_path)
 
     if wandb_active:
         # Use wandb for recording
@@ -101,7 +103,7 @@ def main (train_config,database_config,k_fold,args,channels_copy):
     # set index
     img_index = 0
     label_index = 1
-   
+    mask_index = 2
 
     if modality_remove !=  None:  
         # from channels remove one modality for all datasets in question
@@ -139,7 +141,7 @@ def main (train_config,database_config,k_fold,args,channels_copy):
     # print('load WMH only for validation:')
     # Temporarily modify train_config to not drop FLAIR for WMH loading
     train_config.modality_remove = None
-    WMH_loader,WMH_val_loader,data_laod = get_dataloader(train_config, database_config,["WMH"], cropped_input_size , data_size,channels_copy,k_fold)
+    WMH_loader,WMH_val_loader,data_laod = get_dataloader(train_config, database_config,["WMH"],cropped_input_size , data_size,channels_copy,k_fold)
 
     # initialize GPU
     print("Running on GPU:" + str(args.device_id))
@@ -194,12 +196,14 @@ def main (train_config,database_config,k_fold,args,channels_copy):
             device=device,
             row_settings=["var_names"])
     
-    # Save model summary to wandb as text file
-    summary_path = os.path.join(model_save_path, "model_summary.txt")
-    with open(summary_path, "w") as f:
-        f.write(str(model_summary))
     
     if wandb_active:
+
+        # Save model summary as text file
+        summary_path = os.path.join(model_save_path, "model_summary.txt")
+        with open(summary_path, "w") as f:
+            f.write(str(model_summary))
+
         # Log model summary as a text artifact
         artifact = wandb.Artifact('model_summary', type='model')
         artifact.add_file(summary_path)
@@ -249,6 +253,12 @@ def main (train_config,database_config,k_fold,args,channels_copy):
             total_modalities,
             rand_assign=rand_assign_channels,
         )
+
+    combination_map = {}
+    #loop for allocating combination of mnodalities for each dataset
+    for dataset in datasetlist:
+        combination_map[dataset] = utils.map_combinations(
+            channels[dataset])
 
 
 
@@ -339,7 +349,7 @@ def main (train_config,database_config,k_fold,args,channels_copy):
                     if randomly_drop:
                         modalities_remaining, batch[img_index] = (
                             utils.rand_set_channels_to_zero_with_invar(
-                                channels["BRATS"], batch[img_index],domain_invariant=domain_invariant_slot,mixup =mixup,gin_mix = gin_mix, batch_label_data=batch[label_index],device_id = args.device_id,gin_ipa=train_config.gin_ipa
+                                channels["BRATS"], batch[img_index],mask_data = batch[mask_index],domain_invariant=domain_invariant_slot,mixup =mixup,gin_mix = gin_mix, batch_label_data=batch[label_index],device_id = args.device_id,gin_ipa=train_config.gin_ipa,contrast_augmentation=contrast_augmentation,combination_map=combination_map["BRATS"]
                             )
                         )
                         for i in range(batch[label_index].shape[0]):
@@ -409,7 +419,7 @@ def main (train_config,database_config,k_fold,args,channels_copy):
                         if randomly_drop:
                             modalities_remaining, batch[img_index] = (
                                 utils.rand_set_channels_to_zero_with_invar(
-                                    channels["TBI"], batch[img_index],domain_invariant=domain_invariant_slot,mixup = mixup,gin_mix = gin_mix, batch_label_data=batch[label_index], device_id= args.device_id,gin_ipa=train_config.gin_ipa
+                                    channels["TBI"], batch[img_index],mask_data = batch[mask_index],domain_invariant=domain_invariant_slot,mixup = mixup,gin_mix = gin_mix, batch_label_data=batch[label_index], device_id= args.device_id,gin_ipa=train_config.gin_ipa,contrast_augmentation=contrast_augmentation,combination_map=combination_map["TBI"]
                                 )
                         )
                         # this part is only relevant for TBI when doing multi channel segmentation with modality drop 
@@ -490,7 +500,7 @@ def main (train_config,database_config,k_fold,args,channels_copy):
                     else:
                         if randomly_drop:
                             _, batch[img_index] = utils.rand_set_channels_to_zero_with_invar(
-                                channels[dataset], batch[img_index],domain_invariant=domain_invariant_slot,mixup = mixup, gin_mix = gin_mix, batch_label_data = batch[label_index],device_id =args.device_id,gin_ipa=train_config.gin_ipa
+                                channels[dataset], batch[img_index],mask_data = batch[mask_index],domain_invariant=domain_invariant_slot,mixup = mixup, gin_mix = gin_mix, batch_label_data = batch[label_index],device_id =args.device_id,gin_ipa=train_config.gin_ipa,contrast_augmentation=contrast_augmentation,combination_map=combination_map[dataset]
                             )  # ATLAS WILL ALWAYS BE ONE CHANNEL (no drop)
                         
                         input_data = torch.from_numpy(
@@ -596,6 +606,7 @@ def main (train_config,database_config,k_fold,args,channels_copy):
                 ################ I want to test WMH as I go along to see how it does #######################
                 
                 # Test with all modalities
+
                 for val_data in WMH_val_loader["WMH"]:
 
                     channels['WMH'] = channels_copy['WMH']
@@ -668,6 +679,9 @@ def main (train_config,database_config,k_fold,args,channels_copy):
                     )
                 )
                 total_av_dice.append(metric["WMH"]["dice"])
+
+               
+                
                 
                 ##### Test with only the invariant channel   #####
                 dice_metric_invar = DiceMetric(include_background=True, reduction="mean")
@@ -770,6 +784,8 @@ def main (train_config,database_config,k_fold,args,channels_copy):
                                 )
                             )
                             if domain_invariant_slot == True:
+                                # FIXME: TESTING ON ALL MODALITIES INCLUDING INVARIANT SLOT WITH FLAIR
+                                # input_data[:, channel_map[dataset], :, :, :] = val_data[0]
                                 input_data[:, channel_map[dataset][:-1], :, :, :] = val_data[0]
                             else:
                                 input_data[:, channel_map[dataset], :, :, :] = val_data[0]
@@ -897,7 +913,7 @@ if __name__ == "__main__":
 
     #########################
     args = parser.parse_args()
-    args.device_id = 0
+    args.device_id = 1
     args.datasets = 'TBI_ISLES2022'   #'ISLES2022'
   
     ######################################
