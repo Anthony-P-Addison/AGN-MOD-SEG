@@ -1,5 +1,6 @@
 import random
 import numpy as np
+import math 
 import torch
 from nets.unet import res_unet as Unet
 from itertools import combinations
@@ -40,20 +41,27 @@ def rand_set_channels_to_zero(dataset_modalities: list, batch_img_data: torch.Te
     return modalities_remaining, batch_img_data
 
 
+def map_combinations(dataset_modalities: list[str], invar_ratio: float = 0.2) -> list[list[int]]:
+    """Map all possible modality combinations of each dataset as a dict.
+    optionaly boost the number of time invariatn channel trained on own (NOTE:modalities to keep)
+    """
 
-def map_combinations(dataset_modalities: list):
-    """Map combinations of modalities to the batch data"""
-    # Create all possible combinations of modalities (at least one modality must remain)
     all_combinations = []
     for r in range(1, len(dataset_modalities) + 1):
         combos = list(combinations(range(len(dataset_modalities)), r))
         # Convert each combination tuple to a list with no commas
         for combo in combos:
             all_combinations.append(list(combo))
-    
+
+    if len(all_combinations) > 1:
+        num_combs = len(all_combinations)
+        num_to_add = math.ceil((num_combs * invar_ratio))
+        invar_added = len(dataset_modalities) - 1
+        
+        for _ in range(num_to_add-1):
+            all_combinations.append([invar_added])
+
     return all_combinations
-
-
 
 
 def rand_set_channels_to_zero_with_invar(
@@ -68,9 +76,11 @@ def rand_set_channels_to_zero_with_invar(
     batch_label_data: torch.Tensor = None,
     device_id: str = None,
     combination_map: list = None,
+    augmentation_config = None,
 ) -> tuple[list[int], torch.Tensor]:
     """Randomly set channels to zero and handle invariant channel with optional augmentations"""
-    modalities_remain = []
+    all_modalities_remaining = []
+    all_modalities_dropped = []
     # Keep original data for augmentations
     original_batch = batch_img_data.clone()
     # Working copy for modifications
@@ -80,7 +90,7 @@ def rand_set_channels_to_zero_with_invar(
         # append invariant channel
         working_batch = torch.cat((working_batch, torch.zeros((working_batch.shape[0], 1, working_batch.shape[2], working_batch.shape[3], working_batch.shape[4]))),dim=1)
         original_batch = torch.cat((original_batch, torch.zeros((original_batch.shape[0], 1, original_batch.shape[2], original_batch.shape[3], original_batch.shape[4]))),dim=1)
-
+        
     for i in range(working_batch.shape[0]):   
         # Uniform dropout probability for all cases
         # number_of_dropped_modalities = np.random.randint(0, len(dataset_modalities))
@@ -90,10 +100,11 @@ def rand_set_channels_to_zero_with_invar(
         # )
         # modalities_dropped.sort()
 
+        # provide evey combination of modalities and then randomly select when training.
+        # want to ensure invariatn channel is trained on more times for each combination. 
         modalities_remaining = random.choice(combination_map)
         modalities_dropped = list(set(np.arange(len(dataset_modalities))) - set(modalities_remaining))
 
-    
         # Apply dropout and verify
         working_batch[i,modalities_dropped,:,:,:] = 0
         
@@ -184,7 +195,7 @@ def rand_set_channels_to_zero_with_invar(
                 random_number = random.random()
                 
                 # number below is probability of not using augmentations
-                if random_number < 0.25:
+                if random_number < 0.15:
                     invar = None   
                 else:
                     pathology_label = batch_label_data[i,0,:,:,:]
@@ -195,11 +206,13 @@ def rand_set_channels_to_zero_with_invar(
                     elif len(modalities_dropped) > 0:
                         channel_add = random.sample(modalities_dropped, 1)
                         if original_batch[i,channel_add,:,:,:].any():
-                            invar = spatial_contrast_aug(channel_add,pathology_label,brain_mask,original_batch[i,:,:,:])
+                            invar = spatial_contrast_aug(augmentation_config,channel_add,pathology_label,brain_mask,original_batch[i,:,:,:])
                 
                     else:
-                        channel_add = random.sample(modalities_remaining, 1)
-                        invar = spatial_contrast_aug(channel_add,pathology_label,brain_mask,original_batch[i,:,:,:])
+                        # all modalities remaining. so need to place something in invar channel. 
+
+                        channel_add = random.sample(modalities_remaining[:-1], 1)
+                        invar = spatial_contrast_aug(augmentation_config,channel_add,pathology_label,brain_mask,original_batch[i,:,:,:])
 
         
             ######## TODO:ADD MORE AUGMENTATTIONS HERE WITH A NEW SWITCH  - FOR THE INVAR CHANNEL AS APPROPTIATE##########
@@ -213,8 +226,15 @@ def rand_set_channels_to_zero_with_invar(
                     channel_add = random.sample(modalities_dropped, 1)
                     invar = original_batch[i,channel_add,:,:,:]
                 else:
+
                     channel_add = random.sample(modalities_remaining, 1)
-                    invar = original_batch[i,channel_add,:,:,:]
+                    if contrast_augmentation:
+                        pathology_label = batch_label_data[i,0,:,:,:]
+                        brain_mask = mask_data[i,0,:,:,:] 
+                        invar = spatial_contrast_aug(augmentation_config,channel_add,pathology_label,brain_mask,original_batch[i,:,:,:])
+                    
+                    else:
+                        invar = original_batch[i,channel_add,:,:,:]
 
             # Set invariant channel and verify dropped modalities are still zero
             working_batch[i,[len(dataset_modalities)-1],:,:,:] = invar
@@ -225,8 +245,8 @@ def rand_set_channels_to_zero_with_invar(
                     print(f"Warning: Modality {mod} was not zero after invariant channel processing")
                     working_batch[i,mod,:,:,:] = 0  # Force zero if not already zero
             
-        modalities_remain.append(modalities_remaining)
-
+        all_modalities_dropped.append(modalities_dropped)
+        all_modalities_remaining.append(modalities_remaining)
     ##### --- Track modalities used for training (not dropped) ---##########
 
     # # Initialize counters if they don't exist
@@ -275,7 +295,7 @@ def rand_set_channels_to_zero_with_invar(
 
     #############################################################################
     
-    return modalities_remain, working_batch
+    return all_modalities_dropped, all_modalities_remaining, working_batch
 
 
 def single_slot( batch_img_data: torch.Tensor):
@@ -345,7 +365,7 @@ def create_UNET_input_quicktest(batch, modalities, channel_map, model_modalities
     return input_data
 
 def save_nifti(tensor: torch.Tensor, file_path: str,affine):
-    vars_numpy = tensor.cpu().detach().numpy()
+    vars_numpy = tensor[0].cpu().detach().numpy()
     vars_numpy = np.squeeze(vars_numpy)
     # vars_numpy = np.transpose(vars_numpy,(1,2,3,0))    
     new_image = nib.Nifti1Image(vars_numpy,affine=affine.squeeze())       

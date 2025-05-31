@@ -233,7 +233,8 @@ class TrainImageMaskDataset(ImageDataset):
 
 
 def create_dataloader(
-    val_size: int,
+    val_size: int,  # Per dataset 
+    train_size:int, # Per dataset
     images: list[Path],
     segs: list[Path],
     masks: list[Path],
@@ -270,15 +271,15 @@ def create_dataloader(
 
     elif k_fold is None:
         #images
-        train_images = images[:-val_size]
+        train_images = images[:train_size]
         train_images = train_images * div + train_images[:rem]
-        train_segs = segs[:-val_size]
+        train_segs = segs[:train_size]
         train_segs = train_segs * div + train_segs[:rem]
         val_images = images[-val_size:]
         val_segs = segs[-val_size:]
         #masks
         val_masks = masks[-val_size:]
-        train_masks = masks[:-val_size]
+        train_masks = masks[:train_size]
         train_masks = train_masks * div + train_masks[:rem]
 
     # image augmentation through spatial cropping to size and by randomly rotating
@@ -376,6 +377,9 @@ def get_dataloader(
     for dataset in datasetlist:
         print("Training: ", dataset)
         val_size = database_config.total_size[dataset] - database_config.train_size[dataset]
+
+        train_size = database_config.train_size[dataset] 
+
         images = sorted(glob(os.path.join(img_path[dataset], "*.*")))
         segs = sorted(glob(os.path.join(seg_path[dataset], "*.*")))
         masks = sorted(glob(os.path.join(mask_path[dataset], "*.*")))
@@ -383,6 +387,7 @@ def get_dataloader(
         channels_to_remove = get_modalities_drop(dataset, channels_copy[dataset], train_config.modality_remove)
 
         train_loader_one, val_loader[dataset] = create_dataloader(
+            train_size=train_size,
             val_size=val_size,
             images=images,
             segs=segs,

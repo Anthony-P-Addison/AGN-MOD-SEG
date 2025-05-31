@@ -42,7 +42,7 @@ class ModelTester:
         self.val_loader = {}
         self.cuda_id = "cuda:" + str(self.args.device_id)
         self.device = torch.device(self.cuda_id)
-
+        self.validate_outputs = {} 
         self.test_config.model_file_path = self.checkpoint
 
     def setup_modalities(self):
@@ -138,6 +138,8 @@ class ModelTester:
             self.IOU_metric.reset()
             dataset = self.args.datasets_to_test
             metric[dataset] = {}
+            self.current_sample_logit_predictions = []
+            self.current_sample_label = []
 
             for val_data in self.val_loader[dataset]:
                 if self.test_config.model_net_type == "unet_deep" or "unet_old":
@@ -171,9 +173,24 @@ class ModelTester:
                 roi_size = (self.cropped_input_size[0], self.cropped_input_size[1], self.cropped_input_size[2])
                 sw_batch_size = 1
 
-                val_outputs = sliding_window_inference(input_data, roi_size, sw_batch_size, model)
+                def model_wrapper(x):
+                    outputs = model(x)
+                    # If model returns a tuple of (main_output, aux_output)
+                    if isinstance(outputs, tuple):
+                        return outputs[0]  # Return only the main output
+                    return outputs
+
+                val_outputs = sliding_window_inference(input_data, roi_size, sw_batch_size, model_wrapper)
+
+                # self.current_sample_logit_predictions.append(val_outputs[0])
+
                 val_outputs = [self.post_trans(i) for i in decollate_batch(val_outputs)]
 
+                self.current_sample_logit_predictions.append(val_outputs[0])
+
+                # add the val output to a dictionary with the combination as the key and the val output as the value.
+                
+                self.current_sample_label.append(label)
                 current_dice = self.dice_metric(y_pred=val_outputs, y=label)
                 self.sensitivity_metric(y_pred=val_outputs, y=label)
                 self.precision_metric(y_pred=val_outputs, y=label)
@@ -185,11 +202,15 @@ class ModelTester:
                     file_save_path = self.test_config.save_path + str(steps) + "_" + str(current_dice) + ".nii.gz"
                     utils.save_nifti(val_outputs[0], file_save_path, val_data[3]["affine"])
 
-                pixels_segmented = np.count_nonzero(val_outputs[0])
-                gt_segmented = np.count_nonzero(label[0])
-                segment_pixel_vol.append(pixels_segmented)
-                gt_pixel_vol.append(gt_segmented)
+                # move to cpu and convert to numpy
+                
+                # pixels_segmented = np.count_nonzero(val_outputs)
+                # gt_segmented = np.count_nonzero(label[0])
+                # segment_pixel_vol.append(pixels_segmented)
+                # gt_pixel_vol.append(gt_segmented)
                 steps += 1
+
+            self.validate_outputs[f'{combination}'] = self.current_sample_logit_predictions
 
             metric[dataset]["dice"] = self.dice_metric.aggregate().item()
             metric[dataset]["sensitivity"] = self.sensitivity_metric.aggregate()[0].item()
@@ -227,7 +248,105 @@ class ModelTester:
             print(f"Testing on: {'_'.join(modality_list)} {combination}")
             self.evaluate_model(model, combination, modality_list)
 
+
         print(tabulate.tabulate(self.mean_dice_comb, headers=["Combination", "Mean Dice"]))
+    
+    def return_dictionary_and_label(self):
+        return self.validate_outputs,self.current_sample_label
+
+
+
+
+
+def analyze_and_aggregate_predictions(prediction_dict, ground_truth, device=None):
+    """
+    Analyze predictions by first aggregating across all combinations for each sample,
+    then calculating Dice on the aggregated predictions.
+    
+    Args:
+        prediction_dict (dict): Dictionary mapping combinations (e.g., ('T1', 'FLAIR')) 
+                               to their prediction tensors (shape: [batch_size, ...])
+        ground_truth (torch.Tensor): The ground truth segmentation masks [batch_size, ...]
+        device (torch.device, optional): Device to perform computations on.
+    
+    Returns:
+        dict: Dictionary containing the aggregated Dice scores
+    """
+    if not prediction_dict:
+        print("Error: Empty prediction dictionary.")
+        return None
+    
+    # Setup metrics for evaluation
+    dice_metric = DiceMetric(include_background=True, reduction="mean", get_not_nans=False)
+    activations = Activations(sigmoid=True)
+    as_discrete = AsDiscrete(threshold=0.5)
+
+    
+    # First, determine the number of samples
+    first_combo = next(iter(prediction_dict.values()))
+    num_samples = len(first_combo)
+    
+    # List to store aggregated predictions for each sample
+    aggregated_predictions = []
+    dice_scores = []
+    # Process each sample separately
+    for sample_idx in range(num_samples):
+        # Collect logits for this sample across all combinations
+        sample_logits = []
+        
+        # Gather all predictions for this sample
+        for combo, logits in prediction_dict.items():
+            sample_logits.append(logits[sample_idx:sample_idx+1])  # Keep dimension
+        
+        # Stack and average the logits
+        if sample_logits:
+            stacked_logits= [torch.cat(logits,dim=0) for logits in sample_logits[0]]
+            final_tensor = torch.cat(stacked_logits, dim=0)  
+            aggregated_logits = torch.mean(final_tensor, dim=0)
+
+            # Convert to binary predictions
+            prob_maps = activations(aggregated_logits)
+            binary_preds = as_discrete(prob_maps)
+            y= torch.squeeze(ground_truth[sample_idx],dim=0)
+            dice_metric(y_pred=binary_preds, y= y)
+            aggregated_dice = dice_metric.aggregate().item()
+            
+
+
+            dice_scores.append(aggregated_dice)
+            dice_metric.reset()
+            
+    # calculate mean dice across all samples 
+    mean_dice = np.mean(dice_scores)
+
+ 
+    
+
+    
+    # Create results dictionary
+    ensemble_stats = {
+        "num_samples": num_samples,
+        "total_combinations": len(prediction_dict),
+        "aggregated_dice": aggregated_dice
+    }
+    
+    # Print ensemble statistics
+    print("\n=== Ensemble Results ===")
+    print(f"Number of samples processed: {num_samples}")
+    print(f"Total combinations tested: {len(prediction_dict)}")
+    print(f"Aggregated Dice: {mean_dice:.4f}")
+    
+    return ensemble_stats
+
+
+
+
+
+
+
+
+
+
 
 
  
@@ -256,19 +375,29 @@ if __name__ == "__main__":
 
     ####################
 
-    args.datasets_to_test = 'ISLES'  ###'WMH' #'TBI' # dataset for testing
-    args.modalities_to_test ="1_2_3"       # numeric order of modalities
-    args.test_all_combinations = 0
+    args.datasets_to_test = 'WMH'  ###'WMH' #'TBI' # dataset for testing
+    args.modalities_to_test ="0_1" #"0_1_2_3"       # numeric order of modalities
+    args.test_all_combinations = 1
     args.device_id = 0
-    args.trained_on = "ISLES2022_TBI" #DATASETS the model was trained on
+    args.trained_on = "ISLES2022_TBI_BRATS_MSSEG_ATLAS" #DATASETS the model was trained on
     #########################
 
-    checkpoint1 = ['models/WMH_PRELIM_TEST/_model_remove:_FLAIR/TBI_ISLES2022/2025-05-05_12-19/WMH_PRELIM_TEST_random_drop_True_2025-05-05_12-19_Epoch_599.pth']
+    checkpoint1 = ['models/WMH_PRELIM_TEST/_model_remove:_FLAIR/TBI_ISLES2022_BRATS_MSSEG_ATLAS/2025-05-28_23-47/WMH_PRELIM_TEST_random_drop_True_2025-05-28_23-47_Epoch_499.pth']
+
+    #"',#'models/WMH_PRELIM_TEST/_model_remove:_FLAIR/TBI_ISLES2022_BRATS_MSSEG_ATLAS/2025-05-27_22-03/WMH_PRELIM_TEST_random_drop_True_2025-05-27_22-03_Epoch_449.pth',
+                   
 
     for file in checkpoint1:
         tester = ModelTester(args,file)
         x=tester.run()
-    
+        x,y = tester.return_dictionary_and_label()
+        # analyze_and_aggregate_predictions(x, y)
+
+       
+
+
+#channels["ISLES"] = ["FLAIR", "T1", "T2","DWI"]  
+   
 
 
 

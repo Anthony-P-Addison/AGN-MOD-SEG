@@ -126,7 +126,7 @@ def main():
 
     input_base_dir = "data"  # Base directory containing dataset subfolders
     output_base_dir = "data" # Base directory where mask subfolders will be created
-    datasets = ["MSSEG","ISLES"]     # List of dataset subfolder names to process
+    datasets = ["ATLAS"]     # List of dataset subfolder names to process
     threshold_factor = 1                          # Factor to multiply median corner value by
     corner_size = 5                                   # Size of the cube edge to sample from corners
     img_pattern = "*.nii.gz"                          # Glob pattern for image files (e.g., '*.nii.gz', '*.nii*')
