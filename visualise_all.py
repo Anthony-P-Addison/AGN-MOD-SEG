@@ -8,7 +8,7 @@ import random
 
 # Configuration (Adjust these paths and names)
 BASE_DIR = "data"  # Base directory containing dataset folders
-DATASETS_TO_PLOT = ["MSSEG", "ISLES", "ISLES2022", "ATLAS", "WMH", "TBI", "BRATS", "TUMOUR2"] # Cleaned list
+DATASETS_TO_PLOT = ["MSSEG", "ISLES", "ISLES2022", "ATLAS", "WMH", "TBI", "BRATS", "TUMOUR2",] # Cleaned list
 IMG_SUBDIR = "Images"
 SEG_SUBDIR = "Labels"  # Subdirectory containing segmentation masks
 IMG_PATTERN = "*.nii.gz"

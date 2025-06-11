@@ -5,7 +5,7 @@ from monai.data import decollate_batch
 from monai.inferers import sliding_window_inference
 from monai.metrics import DiceMetric, ConfusionMatrixMetric, MeanIoU
 from monai.transforms import Activations, AsDiscrete, Compose
-from monai.losses import DiceCELoss, DiceLoss
+from monai.losses import DiceCELoss
 from nets.unet import res_unet as unet_old
 from nets.unet_deep import res_unet as unet_deep
 import numpy as np
@@ -21,34 +21,6 @@ import random
 import optuna
 
 
-
-def aux_loss_function(channel_map, datasetlist, modalities_dropped, aux_outs, combined_labels, loss_function):
-    """
-    Only calculate aux loss for samples where the invariant channel is present (not dropped).
-    modalities_dropped: list of lists, one per dataset, each inner list is per batch sample.
-    """
-    valid_indices = []
-    offset = 0  # To keep track of position in the concatenated aux_outs/labels
-
-    for d, dataset in enumerate(datasetlist):
-        invar_channel_idx = len(channel_map[dataset]) - 1
-        dropped_list = modalities_dropped[d]  # List for this dataset
-
-        for i, dropped in enumerate(dropped_list):
-            if invar_channel_idx not in dropped:
-                valid_indices.append(offset + i)
-        offset += len(dropped_list)
-
-    if valid_indices:
-        aux_outs_valid = aux_outs[valid_indices]
-        combined_labels_valid = combined_labels[valid_indices]
-        aux_loss = loss_function(aux_outs_valid, combined_labels_valid)
-    else:
-        aux_loss = 0.0  # or torch.tensor(0.0, device=aux_outs.device)
-    return aux_loss
-
-
-
 def main(train_config,aug_config,database_config,k_fold,args,channels_copy,optuna_trial=None):
 
 
@@ -59,7 +31,7 @@ def main(train_config,aug_config,database_config,k_fold,args,channels_copy,optun
     rand_assign_channels = train_config.rand_assign_channels
     domain_invariant_slot = train_config.domain_invariant_slot
     load_model_path = train_config.load_model_path
-    modality_remove = train_config.modality_remove
+    modality_remove =   train_config.modality_remove
     randomly_drop = bool(train_config.random_drop)
     single_slot = train_config.single_slot
     wandb_active = train_config.wandb_active
@@ -67,22 +39,13 @@ def main(train_config,aug_config,database_config,k_fold,args,channels_copy,optun
     gin_mix = train_config.gin_mix
     contrast_augmentation = train_config.contrast_augmentation
     lr_sched = train_config.lr_sched
-    aux_loss_active = train_config.aux_loss
-   
-   
-    if randomly_drop and single_slot:
-        raise ValueError("Cannot have both random drop and single slot")
-    
-
-    # Save the configuration classes to a JSON modality_remove
-    #         "test_config": test_config.model_dump()
-    #     }, config_file, indent=4)
-    # print(f"Configuration saved to {config_save_path}")
 
     cropped_input_size = train_config.cropped_input_size
     epochs = train_config.epoch
-
-    # channel assignment
+    
+    
+    if randomly_drop and single_slot:
+        raise ValueError("Cannot have both random drop and single slot")
     
 
     # create save model path. If the path does not exist, create it
@@ -98,15 +61,7 @@ def main(train_config,aug_config,database_config,k_fold,args,channels_copy,optun
         # Save the configuration classes to a txt file
         config.save_config_file(model_save_path)
 
-        # with open('wandb_conf.yaml', 'r') as file:
-        #     sweep_config = yaml.safe_load(file)
-        # sweep_id = wandb.sweep(sweep_config)
-        # wandb.agent(sweep_id, function=main, count=10)   # count: number  of sweep configs to trial.
-
-
-
-        
-
+       
     if wandb_active:
         # Use wandb for recording
         wandb.init(
@@ -171,18 +126,20 @@ def main(train_config,aug_config,database_config,k_fold,args,channels_copy,optun
             data_size = max(data_size, train_size[dataset])
 
         total_modalities = total_modalities.union(set(channels[dataset]))
-    
+        
     total_modalities = sorted(list(total_modalities))
     print("Data_size", data_size)
 
 
-    # load data    
+    # load data for training   
     train_loaders,val_loader,data_loader_map = get_dataloader(train_config, database_config,datasetlist, cropped_input_size , data_size,channels_copy,k_fold)
     # print('load WMH only for validation:')
 
-    # Temporarily modify train_config to not drop FLAIR for WMH loading
+    # Load data for validation only. Temporarily modify train_config to not drop FLAIR for WMH loading
     train_config.modality_remove = None
-    WMH_loader,WMH_val_loader,data_laod = get_dataloader(train_config, database_config,["WMH"],cropped_input_size , data_size,channels_copy,k_fold)
+
+    WMH_loader,val_only_loader,data_laod = get_dataloader(train_config, database_config,["ISLES","WMH"],cropped_input_size , data_size,channels_copy,k_fold)
+    
 
     # initialize GPU
     print("Running on GPU:" + str(args.device_id))
@@ -225,36 +182,13 @@ def main(train_config,aug_config,database_config,k_fold,args,channels_copy,optun
 
     elif train_config.model_type == "deep_unet":
         print("TRAINING WITH DEEP UNET")
-        model = unet_deep(in_channels=in_channel).to(device)
+        model = unet_deep(in_channels=in_channel,invariant_channel= train_config.domain_invariant_slot).to(device)
 
 
-    #### Add model visualization and save to wandb  :TODO: make following a defintion and add to utils ####
-    # from torchinfo import summary
-    # model_summary = summary(model, 
-    #         input_size=(1, in_channel, 96, 96, 96),
-    #         col_names=["input_size", "output_size", "num_params", "kernel_size", "trainable"],
-    #         depth=6,
-    #         verbose=1,
-    #         device=device,
-    #         row_settings=["var_names"])
-    
-    
-    # if wandb_active:
 
-    #     # Save model summary as text file
-    #     summary_path = os.path.join(model_save_path, "model_summary.txt")
-    #     with open(summary_path, "w") as f:
-    #         f.write(str(model_summary))
-
-    #     # Log model summary as a text artifact
-    #     artifact = wandb.Artifact('model_summary', type='model')
-    #     artifact.add_file(summary_path)
-    #     wandb.log_artifact(artifact)
     
     # ################################
         
-
-
     print("In Channels= ", len(total_modalities))
     print("Batch size = ", train_config.train_batch_size)
 
@@ -271,7 +205,10 @@ def main(train_config,aug_config,database_config,k_fold,args,channels_copy,optun
                 load_model_path, map_location={"cuda:0": cuda_id, "cuda:1": cuda_id}
             )
         
-        model.load_state_dict(checkpoint)         
+        model.load_state_dict(checkpoint)   
+
+        train_config_modality_invar = train_config.modality_invar_finetune    
+
    
 
     # Initialize loss function
@@ -312,50 +249,20 @@ def main(train_config,aug_config,database_config,k_fold,args,channels_copy,optun
             # warm up the learning rate.
             if current_epoch < 50:
                 return (float(current_epoch) + 1) / float(max(1, 50))
-            elif 50 <= current_epoch <= 175:
+            elif 50 <= current_epoch <= 350:
                 return 1.0
-            elif 175 < current_epoch <= 250:
+            elif 350 < current_epoch <= 400:
                 return 0.4
-            elif 250 < current_epoch <= 450:
+            elif 400 < current_epoch <= 450:
                 return 0.1
             else:
-                return max(0.0, 0.1 - (((current_epoch - 450) / float(max(1, epochs - 450)*0.1))))
+                #return max(0.0, 0.1 - (((current_epoch - 450) / float(max(1, epochs - 450)*0.1))))
+                return max(0.0, 0.1 - (0.1 * (current_epoch - 450) / float(max(1, epochs - 450))))
+
                 #return max(0.0, 0.5 * (1.0 + math.cos(math.pi * (current_epoch - warmup_epochs) / max(1, args.E - warmup_epochs))))
         scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
 
-        # def lr_lambda(current_epoch):
-        #     # Parameters for scheduler
-        #     warmup_epochs = 50
-        #     maintain_epochs = 250  # Maintain max LR until this epoch
-        #     decay_schedule = [
-        #         (250, 1.0),
-        #         (350, 0.7),
-        #         (450, 0.4),
-        #         (550, 0.2),
-        #     ]
-        #     min_lr_factor = 0.1  # Minimum LR will be 10% of the final step
-            
-        #     # Warm-up phase
-        #     if current_epoch < warmup_epochs:
-        #         return (float(current_epoch) + 1) / float(warmup_epochs)
-            
-        #     # Maintain phase
-        #     if current_epoch <= maintain_epochs:
-        #         return 1.0
-            
-        #     # Step decay phase
-        #     for epoch_threshold, lr_factor in decay_schedule:
-        #         if current_epoch <= epoch_threshold:
-        #             return lr_factor
-            
-        #     # Final decay phase
-        #     final_decay = max(
-        #         min_lr_factor * decay_schedule[-1][1],  # Don't go below min_lr_factor
-        #         decay_schedule[-1][1] - ((current_epoch - decay_schedule[-1][0]) / 100) * 0.1
-        #     )
-        #     return final_decay
-        # scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
-    
+     
     
     ##training##
 
@@ -387,7 +294,6 @@ def main(train_config,aug_config,database_config,k_fold,args,channels_copy,optun
 
             for dataset in datasetlist:
 
-             
                 # Only for BRATS BRATS may use different ground truth
                 if dataset == "BRATS":
                     loader_index = data_loader_map["BRATS"]
@@ -447,12 +353,11 @@ def main(train_config,aug_config,database_config,k_fold,args,channels_copy,optun
                     
 
                     input_data = input_data.to(device)
-                    modality_output,aux_output = model(input_data)
+                    modality_output = model(input_data)
                     modality_outputs.append(modality_output)
-                    if aux_loss_active:
-                        aux_outputs.append(aux_output)
                     labels.append(label)
-                    total_modalities_dropped.append(modalities_dropped)
+                    if randomly_drop:
+                        total_modalities_dropped.append(modalities_dropped)
                     #FIXME: need to set  Brats up so for single slot train depending on which modality is randomly selected use a different label 
                     # currently only works for merged labels - which is okay as only going to use this when training a single slot. 
 
@@ -533,14 +438,11 @@ def main(train_config,aug_config,database_config,k_fold,args,channels_copy,optun
                         input_data[:, channel_map["TBI"], :, :, :] = batch[img_index]
                     
                     input_data = input_data.to(device)
-                    modality_output,aux_output = model(input_data)  # run model
-                    modality_outputs.append(modality_output)
-                    if aux_loss_active:
-                        aux_outputs.append(aux_output)
-                        
-                   
+                    modality_output = model(input_data)  # run model
+                    modality_outputs.append(modality_output)      
                     labels.append(label)
-                    total_modalities_dropped.append(modalities_dropped)
+                    if randomly_drop:
+                        total_modalities_dropped.append(modalities_dropped)
 
 
                 else:  # other databases are similar
@@ -578,35 +480,21 @@ def main(train_config,aug_config,database_config,k_fold,args,channels_copy,optun
                     input_data = input_data.to(device)
 
                     label = batch[label_index].to(device)
-                    combined_outs,aux_output = model(input_data)
+                    combined_outs= model(input_data)
                     modality_outputs.append(combined_outs)
                     
-                    aux_outputs.append(aux_output)
-                    labels.append(label)                 
-                    total_modalities_dropped.append(modalities_dropped)
+
+                    labels.append(label)
+                    if randomly_drop:
+                        total_modalities_dropped.append(modalities_dropped)
             
             optimizer.zero_grad()
             modality_outs = torch.cat(modality_outputs, dim=0)
-            
-            if aux_loss_active:
-                aux_outs = torch.cat(aux_outputs, dim=0)
+    
             
             combined_labels = torch.cat(labels, dim=0)
             modality_loss = loss_function(modality_outs, combined_labels)
-
-            if aux_loss_active:
-                aux_loss = aux_loss_function(channel_map,datasetlist,total_modalities_dropped,aux_outs,combined_labels,loss_function)
-            else:
-                aux_loss = 0
-
-            # aux_weight = 0.2
-
-            # if aux_loss == 0:
-            #     weight = 1
-            # else:
-            #     weight = 1+aux_weight
-
-            loss = modality_loss + (0.2*aux_loss)  #/weight
+            loss = modality_loss  
 
             if torch.isnan(loss):
                 raise ValueError("Loss produced NaN value")
@@ -683,42 +571,142 @@ def main(train_config,aug_config,database_config,k_fold,args,channels_copy,optun
                 ################ I want to test WMH as I go along to see how it does #######################
                 
                 # Test with all modalities
-
+        
                 if domain_invariant_slot:
-
-                    for val_data in WMH_val_loader["WMH"]:
-
-                        channels['WMH'] = channels_copy['WMH']
-
-                        channels['WMH'] = [x if x != 'FLAIR' else 'invar' for x in channels['WMH']]
+                    
+                    for dataset in ["WMH","ISLES"]:
                         
-                        channel_map['WMH'] = utils.map_channels(
-                            channels['WMH'],
-                            total_modalities,
-                            rand_assign=rand_assign_channels,
-                        )
+                        for val_data in val_only_loader[dataset]:
 
-                        if single_slot:
-                            input_data, _ = utils.single_slot(val_data[0])
-                        else:
-                            input_data = torch.from_numpy(
-                                np.zeros(
-                                    (
-                                        1,
-                                        len(total_modalities),
-                                        val_data[0].shape[2],
-                                        val_data[0].shape[3],
-                                        val_data[0].shape[4],
-                                    ),
-                                    dtype=np.float32,
-                                )
+                            channels[dataset] = channels_copy[dataset]
+
+                            channels[dataset] = [x if x != 'FLAIR' else 'invar' for x in channels[dataset]]
+                            
+                            channel_map[dataset] = utils.map_channels(
+                                channels[dataset],
+                                total_modalities,
+                                rand_assign=rand_assign_channels,
                             )
-                            if domain_invariant_slot:
-                                input_data[:, channel_map["WMH"], :, :, :] = val_data[0]
-                            else:
-                                input_data[:, channel_map["WMH"], :, :, :] = val_data[0]
 
-                        input_data = input_data.to(device)
+                            if single_slot:
+                                input_data, _ = utils.single_slot(val_data[0])
+                            else:
+                                input_data = torch.from_numpy(
+                                    np.zeros(
+                                        (
+                                            1,
+                                            len(total_modalities),
+                                            val_data[0].shape[2],
+                                            val_data[0].shape[3],
+                                            val_data[0].shape[4],
+                                        ),
+                                        dtype=np.float32,
+                                    )
+                                )
+                                if domain_invariant_slot:
+                                    input_data[:, channel_map[dataset], :, :, :] = val_data[0]
+                                else:
+                                    input_data[:, channel_map[dataset], :, :, :] = val_data[0]
+
+                            input_data = input_data.to(device)
+                            label = val_data[1].to(device)
+                            roi_size = (
+                                cropped_input_size[0],
+                                cropped_input_size[1],
+                                cropped_input_size[2],
+                            )
+                            sw_batch_size = 1
+
+                            val_outputs = sliding_window_inference(
+                            input_data, roi_size, sw_batch_size,model
+                            )
+                            val_outputs = [
+                                post_trans(i) for i in decollate_batch(val_outputs)
+                            ]
+                            dice_metric(y_pred=val_outputs, y=label)
+                            sensitivity_metric(y_pred=val_outputs, y=label)
+                            precision_metric(y_pred=val_outputs, y=label)
+                            IOU_metric(y_pred=val_outputs, y=label)
+                        metric[dataset] = {
+                            "dice": dice_metric.aggregate().item(),
+                            "sensitivity": sensitivity_metric.aggregate()[0].item(),
+                            "precision": precision_metric.aggregate()[0].item(),
+                            "IOU": IOU_metric.aggregate().item(),
+                        }
+                    
+                    
+                        dice_metric.reset()
+                    
+                        sensitivity_metric.reset()
+                        precision_metric.reset()
+                        IOU_metric.reset()
+                        if metric[dataset]["dice"] > best_metric.get(dataset, -1):
+                            best_metric[dataset] = metric[dataset]["dice"]
+                            best_metric_epoch[dataset] = epoch + 1
+                        print("current epoch: {} current mean dice {}: {:.4f} best mean dice {}: {:.4f} at epoch {}".format(
+                                epoch + 1,
+                                dataset,
+                                metric[dataset]["dice"],
+                                dataset,
+                                best_metric[dataset],
+                                best_metric_epoch[dataset],
+                            )
+                        )
+        
+
+                    
+                        ####Report intermediate value to Optuna for pruning########################
+                        if optuna_trial is not None:
+                            step = (epoch + 1) // train_config.val_interval
+                            optuna_trial.report(metric[dataset]["dice"], step)
+                            
+                            if optuna_trial.should_prune():
+                                print(f"Trial pruned at epoch {epoch + 1}, dice: {metric[dataset]['dice']:.4f}")
+                                raise optuna.TrialPruned()
+
+
+                        total_av_dice.append(metric[dataset]["dice"])
+
+                
+                    
+                    ##### Test with only the invariant channel   #####
+                    dice_metric_invar = DiceMetric(include_background=True, reduction="mean")
+                    sensitivity_metric_invar = ConfusionMatrixMetric(metric_name="sensitivity", include_background=True)
+                    precision_metric_invar = ConfusionMatrixMetric(metric_name="precision", include_background=True)
+                    IOU_metric_invar = MeanIoU(include_background=True)
+                
+                    
+                    for val_data in val_only_loader["WMH"]:
+                        # Create input with only the invariant channel
+                        input_data_invar = torch.from_numpy(
+                            np.zeros(
+                                (
+                                    1,
+                                    len(total_modalities),
+                                    val_data[0].shape[2],
+                                    val_data[0].shape[3],
+                                    val_data[0].shape[4],
+                                ),
+                                dtype=np.float32,
+                            )
+                        )
+                        
+                        # Find the invariant channel index
+                        invar_channel_idx = None
+                        for i, modality in enumerate(channels['WMH']):
+                            if modality == 'invar':
+                                invar_channel_idx = channel_map['WMH'][i]
+                                invar_id = invar_channel_idx
+                                break
+                            
+                        
+                        if invar_id is not None:
+                            # Copy only the invariant channel
+                            input_data_invar[:, invar_id, :, :, :] = val_data[0][:, i, :, :, :]
+                        else:
+                            print("Warning: No invariant channel found in WMH data")
+                        
+                        input_data_invar = input_data_invar.to(device)
                         label = val_data[1].to(device)
                         roi_size = (
                             cropped_input_size[0],
@@ -727,148 +715,46 @@ def main(train_config,aug_config,database_config,k_fold,args,channels_copy,optun
                         )
                         sw_batch_size = 1
 
-                        def model_wrapper(x):
-                            outputs = model(x)
-                            # If model returns a tuple of (main_output, aux_output)
-                            if isinstance(outputs, tuple):
-                                return outputs[0]  # Return only the main output
-                            return outputs
-                        val_outputs = sliding_window_inference(
-                            input_data, roi_size, sw_batch_size, model_wrapper
-                        )
-                        val_outputs = [
-                            post_trans(i) for i in decollate_batch(val_outputs)
-                        ]
-                        dice_metric(y_pred=val_outputs, y=label)
-                        sensitivity_metric(y_pred=val_outputs, y=label)
-                        precision_metric(y_pred=val_outputs, y=label)
-                        IOU_metric(y_pred=val_outputs, y=label)
-                    metric["WMH"] = {
-                        "dice": dice_metric.aggregate().item(),
-                        "sensitivity": sensitivity_metric.aggregate()[0].item(),
-                        "precision": precision_metric.aggregate()[0].item(),
-                        "IOU": IOU_metric.aggregate().item(),
-                    }
-                
-                
-                    dice_metric.reset()
-                
-                    sensitivity_metric.reset()
-                    precision_metric.reset()
-                    IOU_metric.reset()
-                    if metric["WMH"]["dice"] > best_metric.get("WMH", -1):
-                        best_metric["WMH"] = metric["WMH"]["dice"]
-                        best_metric_epoch["WMH"] = epoch + 1
-                    print(
-                        "current epoch: {} current mean dice WMH: {:.4f} best mean dice WMH: {:.4f} at epoch {}".format(
-                            epoch + 1,
-                            metric["WMH"]["dice"],
-                            best_metric["WMH"],
-                            best_metric_epoch["WMH"],
-                        )
-                    )
-
-                    #Report intermediate value to Optuna for pruning########################
-                    if optuna_trial is not None:
-                        step = (epoch + 1) // train_config.val_interval
-                        optuna_trial.report(metric["WMH"]["dice"], step)
+                    
                         
-                        if optuna_trial.should_prune():
-                            print(f"Trial pruned at epoch {epoch + 1}, dice: {metric['WMH']['dice']:.4f}")
-                            raise optuna.TrialPruned()
-
-
-                    total_av_dice.append(metric["WMH"]["dice"])
-
-               
-                
-                ##### Test with only the invariant channel   #####
-                dice_metric_invar = DiceMetric(include_background=True, reduction="mean")
-                sensitivity_metric_invar = ConfusionMatrixMetric(metric_name="sensitivity", include_background=True)
-                precision_metric_invar = ConfusionMatrixMetric(metric_name="precision", include_background=True)
-                IOU_metric_invar = MeanIoU(include_background=True)
-                
-                for val_data in WMH_val_loader["WMH"]:
-                    # Create input with only the invariant channel
-                    input_data_invar = torch.from_numpy(
-                        np.zeros(
-                            (
-                                1,
-                                len(total_modalities),
-                                val_data[0].shape[2],
-                                val_data[0].shape[3],
-                                val_data[0].shape[4],
-                            ),
-                            dtype=np.float32,
+                        val_outputs_invar = sliding_window_inference(
+                            input_data_invar, roi_size, sw_batch_size,model
+                        )
+                        val_outputs_invar = [
+                            post_trans(i) for i in decollate_batch(val_outputs_invar)
+                        ]
+                        dice_metric_invar(y_pred=val_outputs_invar, y=label)
+                        sensitivity_metric_invar(y_pred=val_outputs_invar, y=label)
+                        precision_metric_invar(y_pred=val_outputs_invar, y=label)
+                        IOU_metric_invar(y_pred=val_outputs_invar, y=label)
+                    
+                    metric["WMH_invar"] = {
+                        "dice": dice_metric_invar.aggregate().item(),
+                        "sensitivity": sensitivity_metric_invar.aggregate()[0].item(),
+                        "precision": precision_metric_invar.aggregate()[0].item(),
+                        "IOU": IOU_metric_invar.aggregate().item(),
+                    }
+                    
+                    print(
+                        "current epoch: {} current mean dice WMH (invar only): {:.4f}".format(
+                            epoch + 1,
+                            metric["WMH_invar"]["dice"],
                         )
                     )
                     
-                    # Find the invariant channel index
-                    invar_channel_idx = None
-                    for i, modality in enumerate(channels['WMH']):
-                        if modality == 'invar':
-                            invar_channel_idx = channel_map['WMH'][i]
-                            invar_id = invar_channel_idx
-                            break
-                           
-                    
-                    if invar_id is not None:
-                        # Copy only the invariant channel
-                        input_data_invar[:, invar_id, :, :, :] = val_data[0][:, i, :, :, :]
-                    else:
-                        print("Warning: No invariant channel found in WMH data")
-                    
-                    input_data_invar = input_data_invar.to(device)
-                    label = val_data[1].to(device)
-                    roi_size = (
-                        cropped_input_size[0],
-                        cropped_input_size[1],
-                        cropped_input_size[2],
-                    )
-                    sw_batch_size = 1
+                    if wandb_active:
+                        wandb.log(
+                            {
+                                "epoch_val": epoch + 1,
+                               # "mdice_WMH": metric["WMH"]["dice"],     # was WMH before
+                               # "mdice_WMH_invar": metric["WMH_invar"]["dice"],
+                                "mdice_ISLES": metric["ISLES"]["dice"], }
+                        )
 
-                    def model_wrapper(x):
-                        outputs = model(x)
-                        # If model returns a tuple of (main_output, aux_output)
-                        if isinstance(outputs, tuple):
-                            return outputs[0]  # Return only the main output
-                        return outputs
-                    
-                    val_outputs_invar = sliding_window_inference(
-                        input_data_invar, roi_size, sw_batch_size, model_wrapper
-                    )
-                    val_outputs_invar = [
-                        post_trans(i) for i in decollate_batch(val_outputs_invar)
-                    ]
-                    dice_metric_invar(y_pred=val_outputs_invar, y=label)
-                    sensitivity_metric_invar(y_pred=val_outputs_invar, y=label)
-                    precision_metric_invar(y_pred=val_outputs_invar, y=label)
-                    IOU_metric_invar(y_pred=val_outputs_invar, y=label)
-                
-                metric["WMH_invar"] = {
-                    "dice": dice_metric_invar.aggregate().item(),
-                    "sensitivity": sensitivity_metric_invar.aggregate()[0].item(),
-                    "precision": precision_metric_invar.aggregate()[0].item(),
-                    "IOU": IOU_metric_invar.aggregate().item(),
-                }
-                
-                print(
-                    "current epoch: {} current mean dice WMH (invar only): {:.4f}".format(
-                        epoch + 1,
-                        metric["WMH_invar"]["dice"],
-                    )
-                )
-                
-                if wandb_active:
-                    wandb.log(
-                        {
-                            "epoch_val": epoch + 1,
-                            "mdice_WMH": metric["WMH"]["dice"],
-                            "mdice_WMH_invar": metric["WMH_invar"]["dice"],
-                        }
-                    )
+
                 #########################################
-                validate_other_modalities = False
+                validate_other_modalities = True
+                #if epoch> 100
                 
                 if validate_other_modalities:
                     for dataset in datasetlist:
@@ -916,15 +802,9 @@ def main(train_config,aug_config,database_config,k_fold,args,channels_copy,optun
                             )
                             sw_batch_size = 1
 
-                            def model_wrapper(x):
-                                outputs = model(x)
-                                # If model returns a tuple of (main_output, aux_output)
-                                if isinstance(outputs, tuple):
-                                    return outputs[0]  # Return only the main output
-                                return outputs
                             # using sliding window for the whole 3D image
                             val_outputs = sliding_window_inference(
-                                input_data, roi_size, sw_batch_size, model_wrapper
+                                input_data, roi_size, sw_batch_size,model
                             )
                             val_outputs = [
                                 post_trans(i) for i in decollate_batch(val_outputs)
@@ -1012,7 +892,7 @@ def main(train_config,aug_config,database_config,k_fold,args,channels_copy,optun
     # if wandb_active:
     #     wandb.log({"Best_Checkpint_Path":model_save_best_name})
 
-    return metric["WMH"]["dice"]
+   
 
             
                 
@@ -1029,10 +909,16 @@ if __name__ == "__main__":
         "--k_fold", help="k_fold cross validation number fo folds", type=int, default=None
     )
 
+    parser.add_argument(
+        "--modality_remove", help="modality to remove", type=str, default=None
+    )
+
     #########################
     args = parser.parse_args()
     args.device_id = 0
-    args.datasets = 'TBI_ISLES2022_BRATS_MSSEG_ATLAS'   #'ISLES2022'
+    args.datasets =  'TBI_ISLES2022_BRATS_MSSEG_ATLAS'   #'ISLES2022'
+    #args.k_fold = 5
+    args.dataset
   
     ######################################
 
@@ -1043,8 +929,12 @@ if __name__ == "__main__":
 
     #########
 
-
    
     main(train_config,aug_config,database_config,k_fold=None,args = args,channels_copy = channels_copy,optuna_trial=None)
  
 
+
+  # TODO: Commands for Felix to run - thanks !!
+
+  # python train_2.py --datasets TBI_ISLES2022_BRATS_MSSEG_ATLAS --device_id 0 --modality_remove 'FLAIR'
+  # python train_2.py --datasets TBI_WMH_BRATS_MSSEG_ATLAS --device_id 0 --modality_remove None

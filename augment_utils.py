@@ -10,22 +10,26 @@ from config import Augmentation_config
 
 
 def spatial_contrast_aug(
-    aug_config: None,
+    aug_config: Augmentation_config,
     channel_add:list,
     pathology_label: torch.Tensor,
     brain_mask: torch.Tensor,
     batch_img: torch.Tensor,
-    blur_boundary_prob: float = 0,
-    blur_sigma_range: tuple = (0.5, 0.5),
+    blur_boundary_prob: float = 1,   #   1 
+    blur_sigma_range: tuple = (0.5, 0.5),   # 0.5 0.5 
     dilation_iterations: int = 1,
     plot_image: bool = False
+
+
 ):
     """
     Apply spatial contrast augmentation by modifying intensity in brain and tumor regions,
     followed by optional spatial blurring of image features directly across the tumor boundary.
     Background (non-brain) regions are preserved.
     """
-    # --- Input Shape Handling & Mask Preparation ---
+   
+    # Track if significant augmentations (beyond scale/shift) have been applied
+    significant_aug_applied = False
 
     # dropped modality
     img = batch_img[channel_add,:,:,:]
@@ -42,15 +46,22 @@ def spatial_contrast_aug(
     brain_inversion = None
     tumor_inversion = None
     tumor_channel = None
+    brain_factor_multiply = None
+    brain_factor_intensity = None
+    tumor_factor_multiply = None
+    tumor_factor_intensity = None
 
     # Create a working copy that only contains the brain region initially
-    working_img = torch.where(brain_mask_bool, img, img) # Start with original brain + background
+    #working_img = torch.where(brain_mask_bool, img, img) # Start with original brain + background
+    working_img = img.clone()
+
 
     # --- 0. Pathology Modality Switch (Applied first) ---
     if random.random() < aug_config.prob_pathology_switch:
         possible_tumor_channels = [i for i in range(batch_img.shape[0]-1) if i not in channel_add ]
         tumor_channel = random.choice(possible_tumor_channels)
         working_img = torch.where(tumor_mask_bool, batch_img[tumor_channel], img)
+        significant_aug_applied = True  # Modality switch is significant
 
     #### Healthy brain tissue Augmentations ####
 
@@ -58,51 +69,70 @@ def spatial_contrast_aug(
     if random.random() < aug_config.prob_brain_invert:    
         brain_inversion = True
         working_img = torch.where(brain_mask_bool, working_img * -1.0, working_img)
+        significant_aug_applied = True  # Inversion is significant
 
     # --- 2. MixUP | BRAIN TISSUE ---
+    
     if random.random() < aug_config.prob_brain_mixup:
         working_img = MixUp(batch_img,working_img,channel_add,brain_mask_bool)
+        significant_aug_applied = True  # Mixup is significant
 
     # --- 3. INTENSITY/CONTRAST | BRAIN TISSUE  ---
+   
     # Scale factors relative to the image's statistics
-
     # brain_factor_intensity = torch.tensor(random.choice([random.uniform(0.1, 0.5), random.uniform(-0.5, -0.1)]), device=img.device, dtype=img.dtype)
-    brain_factor_multiply = torch.tensor(random.uniform(0.9, 1.1), device=img.device, dtype=img.dtype)
-    brain_factor_intensity = torch.tensor(random.uniform(-0.1,0.1), device=img.device, dtype=img.dtype)
-    
-    # Apply brain factors to the whole brain region first
-    working_img = torch.where(
-        brain_mask_bool,
-        working_img * brain_factor_multiply + brain_factor_intensity,
-        working_img # Keep background unchanged
-    )
+    if aug_config.prob_brain_scale_shift:
+        if aug_config.uniform_scale_shift:
+            brain_factor_multiply = torch.tensor(random.uniform(*aug_config.brain_factor_multiply), device=img.device, dtype=img.dtype)
+            brain_factor_intensity = torch.tensor(random.uniform(*aug_config.brain_factor_intensity), device=img.device, dtype=img.dtype)
+        else:
+            brain_factor_multiply = torch.tensor(random.uniform(*aug_config.brain_factor_multiply), device=img.device, dtype=img.dtype)
+            brain_factor_intensity = torch.tensor(random.uniform(*aug_config.brain_factor_intensity), device=img.device, dtype=img.dtype)
+        
+        # Apply brain factors to the whole brain region first
+        working_img = torch.where(
+            brain_mask_bool,
+            working_img * brain_factor_multiply + brain_factor_intensity,
+            working_img # Keep background unchanged
+        )
+        # Scale/shift is NOT considered significant augmentation
 
-    #### Pathology Brain Tissue Augmentations ####
+    ################### Pathology Brain Tissue Augmentations ###################
+
     if torch.any(tumor_mask_bool):
         # --- 1. INVERSION | PATHOLOGY TISSUE --
         if random.random() < aug_config.prob_pathology_invert:
             tumor_inversion = True
             working_img = torch.where(tumor_mask_bool, working_img * -1.0, working_img)
+            significant_aug_applied = True  # Pathology inversion is significant
 
         # --- 2. MixUP | PATHOLOGY TISSUE ---
         if random.random() < aug_config.prob_pathology_mixup:
             working_img = MixUp(batch_img,working_img,channel_add,tumor_mask_bool)
+            significant_aug_applied = True  # Pathology mixup is significant
 
         # --- 3. INTENSITY/CONTRAST | PATHOLOGY TISSUE ---
         # Scale factors relative to the image's statistics
-        tumor_factor_multiply = torch.tensor(random.uniform(0.9, 1.1), device=img.device, dtype=img.dtype)
-        tumor_factor_intensity = torch.tensor(random.uniform(-0.1,0.1), device=img.device, dtype=img.dtype)
-        # tumor_factor_intensity = torch.tensor(random.choice([random.uniform(0.1, 0.5), random.uniform(-0.5, -0.1)]), device=img.device, dtype=img.dtype)
+        if aug_config.prob_tumor_scale_shift:
+            if aug_config.uniform_scale_shift:
+                tumor_factor_multiply = brain_factor_multiply
+                tumor_factor_intensity = brain_factor_intensity
+            else:
+                tumor_factor_multiply = torch.tensor(random.uniform(*aug_config.tumor_factor_multiply), device=img.device, dtype=img.dtype)
+                tumor_factor_intensity = torch.tensor(random.uniform(*aug_config.tumor_factor_intensity), device=img.device, dtype=img.dtype)
+                # tumor_factor_intensity = torch.tensor(random.choice([random.uniform(0.1, 0.5), random.uniform(-0.5, -0.1)]), device=img.device, dtype=img.dtype)
 
-        # Apply tumor factors specifically where tumor_mask_bool is True
-        working_img = torch.where(
-            tumor_mask_bool,
-            working_img * tumor_factor_multiply + tumor_factor_intensity,
-            working_img
-        )
+            # Apply tumor factors specifically where tumor_mask_bool is True
+            working_img = torch.where(
+                tumor_mask_bool,
+                working_img * tumor_factor_multiply + tumor_factor_intensity,
+                working_img
+            )
+            # Scale/shift is NOT considered significant augmentation
 
         # --- Spatial Blurring at Tumor Boundary ---
-        if random.random() < blur_boundary_prob:
+        # Only apply if significant augmentations have been applied
+        if significant_aug_applied and random.random() < blur_boundary_prob:
             tumor_mask_np = tumor_mask_bool[0].cpu().numpy()
             brain_mask_np = brain_mask_bool[0].cpu().numpy()
 
@@ -193,10 +223,10 @@ def plot_augmentation(img, tumor_mask_bool, brain_mask_bool, augmented_img,brain
         plt.axis('off')
 
         # Add overall title with augmentation parameters
-        plt.suptitle(
-            f"Augmentation Parameters:\nBrain scale: {brain_factor_multiply:.2f}, shift: {brain_factor_intensity:.2f}\nTumor scale: {tumor_factor_multiply:.2f},shift: {tumor_factor_intensity:.2f}\nBrain inversion: {brain_inversion},Tumor inversion: {tumor_inversion}\nTumour_swap: {tumor_channel}",
-            y=1.05,
-        )
+        # plt.suptitle(
+        #     f"Augmentation Parameters:\nBrain scale: {brain_factor_multiply:.2f}, shift: {brain_factor_intensity:.2f}\nTumor scale: {tumor_factor_multiply:.2f},shift: {tumor_factor_intensity:.2f}\nBrain inversion: {brain_inversion},Tumor inversion: {tumor_inversion}\nTumour_swap: {tumor_channel}",
+        #     y=1.05,
+        # )
 
         # Save only, don't show
         plt.tight_layout()
@@ -210,7 +240,7 @@ def plot_augmentation(img, tumor_mask_bool, brain_mask_bool, augmented_img,brain
 
 
 
-def MixUp(x:torch.tensor, working_image:torch.tensor,channel_add:int,mask:torch.tensor):
+def MixUp(x:torch.tensor, working_image:torch.tensor,channel_add:int,mask:torch.tensor,lam_params:tuple = (0.65, 0.65)):
     """
     Apply mixup contrast augmentation to the input tensor x.
     Args:
@@ -221,12 +251,11 @@ def MixUp(x:torch.tensor, working_image:torch.tensor,channel_add:int,mask:torch.
     possible_channels = [i for i in range(x.shape[0]-1) if i not in channel_add ]
     mix = random.choice(possible_channels)
     mix_image = x[mix]
-    lam = np.random.uniform(0.70, 1.0)
+    lam = np.random.uniform(lam_params[0],lam_params[1])
 
     mixed_x = torch.mul(working_image[0],lam)+ torch.mul(mix_image,(1-lam))
     mixed_x =torch.where(mask,mixed_x,working_image) 
     return mixed_x
-
 
 
 
@@ -443,6 +472,15 @@ def mixup_data_causality(x: torch.tensor, device_id, aug_type:str, all_mod_dropp
         # replace the background with the original background
         x = torch.where(x < threshold, x, aug_x)
     return x
+
+
+
+
+
+
+
+
+
 
 
 if __name__ == "__main__":

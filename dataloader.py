@@ -249,7 +249,9 @@ def create_dataloader(
 ) -> None:
     """Create monai wrapped dataloaders for training and validation data"""
 
-    if k_fold is None:
+    if k_fold is None:   
+       
+        #TODO: need to sort this for when i do not want to load training data. 
         div = total_train_data_size//current_train_data_size
         rem = total_train_data_size%current_train_data_size
 
@@ -268,6 +270,8 @@ def create_dataloader(
         train_segs = [segs[i] for i in train_indices]
         val_images = [images[i] for i in val_indices]
         val_segs = [segs[i] for i in val_indices]
+        train_masks = [masks[i] for i in train_indices]
+        val_masks = [masks[i] for i in val_indices]
 
     elif k_fold is None:
         #images

@@ -12,8 +12,7 @@ class res_unet(nn.Module):
         in_channels: int,
         out_channels:int = 1,
         last_layer_conv_only:bool = True,
-        invariant_channel: bool = False,
-        aux_loss: bool = False
+        invariant_channel: bool =False,
         
     ) -> None:
         super().__init__()
@@ -23,7 +22,6 @@ class res_unet(nn.Module):
         self.invariant_channel_enabled = invariant_channel
         invariant_out_channels = 8
         self.invariant_out_channels = invariant_out_channels
-        self.aux_loss = aux_loss
 
     
         if self.invariant_channel_enabled:
@@ -33,8 +31,6 @@ class res_unet(nn.Module):
                 Convolution(spatial_dims=3,in_channels=8,out_channels=16,strides=1,kernel_size=3,dropout=0.2),
                 Convolution(spatial_dims=3,in_channels=16,out_channels=invariant_out_channels,strides=1,kernel_size=3,dropout=0.2))
             modality_channels = in_channels-1
-            if self.aux_loss:
-                self.aux_head = AuxHeadWithPreproc( self.invariant_out_channels)
         else:
             self.invariant_stream = None
             modality_channels = in_channels
@@ -85,15 +81,9 @@ class res_unet(nn.Module):
             modality_features = self.conv_1(modality_x)
             fused_features = torch.cat((modality_features, invariant_features), dim=1)
 
-            if self.aux_loss:
-                aux_output = self.aux_head(invariant_features)
-            else:
-                aux_output = None
-
         else:
             modality_features = self.conv_1(x)
             fused_features = modality_features
-            aux_output = None
             
 
         down1 = self.down_conv_1(fused_features)
@@ -116,7 +106,7 @@ class res_unet(nn.Module):
 
         
         
-        return up_out_4, aux_output
+        return up_out_4
 
 
 class AuxHeadWithPreproc(nn.Module):

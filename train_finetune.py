@@ -6,8 +6,9 @@ from monai.data import decollate_batch
 from monai.inferers import sliding_window_inference
 from monai.metrics import DiceMetric,ConfusionMatrixMetric,MeanIoU
 from monai.transforms import Activations, AsDiscrete, Compose
-from monai.losses.dice import DiceLoss
-from nets.unet import Unet
+from monai.losses.dice import DiceCELoss
+from nets.unet import res_unet as unet_old
+from nets.unet_deep import res_unet as unet_deep
 import numpy as np
 import utils
 from dataloader import get_dataloader
@@ -16,7 +17,7 @@ import config
 import datetime
 
 
-def main(args:argparse.Namespace, wandb_report: bool):
+def main(args:argparse.Namespace,k_fold: None):
 
     now = datetime.datetime.now()
     date = now.strftime("%Y-%m-%d_%H-%M")
@@ -29,36 +30,46 @@ def main(args:argparse.Namespace, wandb_report: bool):
     train_config=config.Finetune_config()
     randomly_drop = bool(args.randomly_drop)
     Database_config=config.Database_config()
-    add_slot_to_pre_trained_model = train_config.add_slot_to_pre_trained_model
+    add_channel_to_pre_trained_model = train_config.add_channel_to_pre_trained_model
     cropped_input_size = train_config.cropped_input_size
-    modalities_when_trained=args.modalities_when_trained.split("_")
-    add_invar_channel = train_config.add_invar_channel
-
+    datasets_trained_initially=args.datasets_trained_initially.split("_")
+    modality_remove = train_config.modality_remove
     epochs=train_config.epoch
 
-    new_model_save_path = os.path.join(os.path.join(train_config.model_save_path, f"Finetune:_with_{args.datasets}_" + f"trained on {args.modalities_when_trained}_" + date + "/"))
+    new_model_save_path = os.path.join(os.path.join(train_config.model_save_path, f"Finetune:_with_{args.datasets}_" + f"trained on {args.datasets_trained_initially}_" + date + "/"))
     if not os.path.exists(
         new_model_save_path):
         os.makedirs(new_model_save_path)
 
-    if wandb_report:
+    if train_config.wandb_report:
         # Use wandb for recording
         run = wandb.init(
         #Set the project where this run will be logged
         project=train_config.project_name,
-        name= "finetune invar slot with" + str(train_config.new_mod_finetune) +":_" + str(finetune_dataset) + "_"+ "rand_drop_" + str(args.randomly_drop) + f"_trained on: {str(args.modalities_when_trained)}" + date
+        name= "finetune invar slot with" + str(train_config.new_mod_finetune) +":_" + str(finetune_dataset) + "_"+ "rand_drop_" + str(args.randomly_drop) + f"_trained on: {str(args.datasets_trained_initially)}" + date
                 )   
+    
+    if k_fold:
+        print(f"Training split___: {k_fold}")
 
     # print setting for training
     print("lr: ",train_config.lr)
     print("Workers: ", train_config.workers)
     print("Batch size: ",train_config.train_batch_size)
     print("RANDOMLY DROP? ",randomly_drop)
-    print(f"THe model trained on {modalities_when_trained} to be fine tuned on {finetune_dataset}")
+    print(f"THe model trained on {datasets_trained_initially} to be fine tuned on {finetune_dataset}")
+
+    if modality_remove !=  None:  
+        # from channels remove one modality for all datasets in question
+        channels = Database_config.channels
+        for key,value in channels.items():
+            channels[key] = [x for x in value if x != modality_remove]
+        print(f"Removed {str(modality_remove)} from datasets")
 
     # set index
     img_index = 0
     label_index = 1
+    mask_index = 2
 
     # Set the data size and total modalities
     channels= Database_config.channels
@@ -69,28 +80,40 @@ def main(args:argparse.Namespace, wandb_report: bool):
 
     #####
 
+    combination_map = {}
+    #loop for allocating combination of mnodalities for each dataset
+    for dataset in datasetlist:
+        combination_map[dataset] = utils.map_combinations(
+            channels[dataset])
+
     total_modalities = []
     total_modalities = set(total_modalities)
     # Loop for allocating channel
     channel_map = {}
 
     ## Previous datasets ######
-    for dataset in modalities_when_trained:
+    for dataset in datasets_trained_initially:
         total_modalities = total_modalities.union(set(channels[dataset]))
-
+    
+    if "FLAIR" in total_modalities:
+        total_modalities.remove("FLAIR")
+   
     total_modalities = sorted(list(total_modalities))
+    
 
     # get max dataset size. Over sample smaller datasets.
     for dataset in finetune_dataset:
-        data_size = max(data_size, train_size[dataset])   
+        if k_fold is not None:
+            data_size = len(k_fold['train'])
+        else:
+            data_size = max(data_size, train_size[dataset])
+        
     print("Total modalities: ", total_modalities)
     print("Data_size", data_size)
 
     
-
-    if add_slot_to_pre_trained_model or add_invar_channel:
-        total_modalities.append("DWI")                  #(f"Finetune:_{train_config.new_mod_finetune}")
-
+    if add_channel_to_pre_trained_model or train_config.new_mod_finetune:
+        total_modalities.append(train_config.new_mod_finetune)                  
 
 
     for dataset in datasetlist:
@@ -105,9 +128,12 @@ def main(args:argparse.Namespace, wandb_report: bool):
     data_loader_map = {}    
     model_save_path = train_config.model_save_path    
     val_loader={}
-
+ 
     # get dataloader
-    train_loaders, val_loader,data_loader_map = get_dataloader(train_config, Database_config, [dataset], cropped_input_size, data_size,channels)
+    train_config.modality_remove = None
+    train_loaders, val_loader,data_loader_map = get_dataloader(train_config, Database_config, [dataset], cropped_input_size, data_size,channels,k_fold=k_fold)
+
+
 
     # initialize GPU
     print("Running on GPU:" + str(args.device_id))
@@ -127,12 +153,12 @@ def main(args:argparse.Namespace, wandb_report: bool):
     if train_config.model_type == "UNET":
         print("TRAINING WITH UNET")
         in_channel = len(total_modalities)
-        model = Unet(in_channels=in_channel).to(device)
+        model = unet_deep(in_channels=in_channel).to(device)
         optimizer = torch.optim.Adam(model.parameters(), lr=train_config.lr)
         epoched = 0
         print("LOADING MODEL: ", args.load_model_finetune_path)
         # add slot to the pre-trained model to finetune unseen modality.
-        if add_slot_to_pre_trained_model:
+        if add_channel_to_pre_trained_model:
             load = torch.load(
                 args.load_model_finetune_path,
                 map_location={"cuda:0": cuda_id, "cuda:1": cuda_id},
@@ -146,7 +172,7 @@ def main(args:argparse.Namespace, wandb_report: bool):
         model.load_state_dict(checkpoint)
 
     # defined loss function
-    loss_function = DiceLoss(sigmoid=True)   
+    loss_function = DiceCELoss(sigmoid=True, lambda_dice=0.5, lambda_ce=0.5) 
 
     # initialise best metric
     best_metric={}
@@ -179,7 +205,10 @@ def main(args:argparse.Namespace, wandb_report: bool):
                     loader_index = data_loader_map["BRATS"]
                     batch = batch_data[loader_index]
 
+                     
+
                     if randomly_drop:
+
                         modalities_remaining, batch[img_index] = utils.rand_set_channels_to_zero(channels["BRATS"], batch[img_index])
                         for i in range (batch[label_index].shape[0]):
                             # For BRATS because edema can only be seen on some modalities can use different ground truth for different sets of modalities in input (this need the ground truth file that have multiple channels and for each channel it contain a different gound truth)
@@ -206,9 +235,13 @@ def main(args:argparse.Namespace, wandb_report: bool):
                     batch = batch_data[loader_index]               
                     # if randomly_drop:
                     #     _, batch[img_index] = utils.rand_set_channels_to_zero(channels[dataset], batch[img_index])     #ATLAS WILL ALWAYS BE ONE
+                    
+                    
                     if randomly_drop:
-                        _, batch[img_index] = utils.rand_set_channels_to_zero_with_invar(
-                            channels[dataset], batch[img_index],domain_invariant=False
+                         #_, batch[img_index]
+                        
+                        all_modalities_dropped, all_modalities_remaining, batch[img_index] = utils.rand_set_channels_to_zero_with_invar(
+                            channels[dataset], batch[img_index],mask_data=batch[mask_index],domain_invariant=False,combination_map = combination_map[dataset]
                             )  # ATLAS WILL ALWAYS BE ONE CHANNEL (no drop) 
 
                     input_data = torch.from_numpy(np.zeros((batch[img_index].shape[0],len(total_modalities),cropped_input_size[0],cropped_input_size[1],cropped_input_size[2]),dtype=np.float32))
@@ -228,7 +261,7 @@ def main(args:argparse.Namespace, wandb_report: bool):
             epoch_loss += loss.item()
             epoch_len = data_size  // train_config.train_batch_size
             print(f"{step}/{epoch_len}, train_loss: {loss.item():.4f}")
-            if wandb_report:
+            if train_config.wandb_report:
                 wandb.log({"loss":loss.item(),"epoch":epoch+1})
         epoch_loss /= step
         print(f"epoch {epoch + 1} average loss: {epoch_loss:.4f}")
@@ -333,7 +366,7 @@ def main(args:argparse.Namespace, wandb_report: bool):
                             epoch + 1,dataset,metric[dataset]["dice"],dataset, best_metric[dataset], best_metric_epoch[dataset]
                         )
                     )
-                    if wandb_report:
+                    if train_config.wandb_report:
                         # wandb log
                         # here only use wandb log to show other metric
                         wandb.log({"epoch_val":epoch+1,"mdice_"+dataset:metric[dataset]["dice"], "sensitivity_"+dataset:metric[dataset]["sensitivity"],"precision_"+dataset:metric[dataset]["precision"],"mIOU_"+dataset:metric[dataset]["IOU"]})
@@ -341,9 +374,6 @@ def main(args:argparse.Namespace, wandb_report: bool):
 
 if __name__ == "__main__":
 
-
-
-    wandb_report = True
 
     torch.multiprocessing.set_sharing_strategy('file_system') 
 
@@ -355,16 +385,14 @@ if __name__ == "__main__":
     parser.add_argument("--randomly_drop", help="0 or 1, 1 if random dropping modalities when training", type=int, default='1')
     parser.add_argument("--load_model_finetune_path", help="The path of the pretrained model", type=str)
     parser.add_argument("--manual_channel_map", help="The allocated channel index of the modalities(each channel) in the finetuning input (start from 0)     Using '_' to separate.  For example, 1_3 means the first modality in the finetuning input goes to the second channel of the model, and the second modality goes to the fourth channel of the model.", type=str)
-    parser.add_argument("--modalities_when_trained", help="modalities used for training the pre-train model using '_' to separate", type=str)
+    parser.add_argument("--datasets_trained_initially", help="modalities used for training the pre-train model using '_' to separate", type=str)
     args = parser.parse_args()
 
-    args.device_id = 1
+    args.device_id = 0
     args.datasets = "ISLES"
-    args.randomly_drop = 0
-    args.load_model_finetune_path = 'models/modality_invariant_slot/WMH_MSSEG_BRATS_ATLAS_TBI/modality_invariant_slot_random_drop_1WMH_MSSEG_BRATS_ATLAS_TBI2025-01-08_15-48_BEST_AVERAGE.pth'
-    args.modalities_when_trained = 'WMH_MSSEG_BRATS_ATLAS_TBI'  
+    args.randomly_drop = 1
+    args.load_model_finetune_path = 'models/WMH_PRELIM_TEST/_model_remove:_FLAIR/TBI_ISLES2022_BRATS_MSSEG_ATLAS/2025-05-27_22-03/WMH_PRELIM_TEST_random_drop_True_2025-05-27_22-03_Epoch_599.pth'
+    args.datasets_trained_initially = 'ISLES2022_MSSEG_BRATS_ATLAS_TBI'  
 
     
-
-    
-    main(args, wandb_report)
+    main(args,k_fold=None)
