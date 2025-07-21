@@ -56,7 +56,7 @@ class ModelTester:
                     
             # if removing modality completely from the dataset during testing
             if  self.test_config.modality_remove is not None:
-                self.database_config.channels[data] = [modality for modality in self.database_config.channels[data] if modality != self.test_config.modality_remove]
+                self.database_config.channels[data] = [modality for modality in self.database_config.channels[data] if modality not in self.test_config.modality_remove]
 
             if self.test_config.domain_invariant_slot:
                 self.total_modalities.add("invar")
@@ -70,7 +70,7 @@ class ModelTester:
         if self.test_config.modality_rem_train is not None:
             self.database_config.channels[self.datasets_to_test] = ["invar" if modality == self.test_config.modality_rem_train else modality for modality in self.database_config.channels[self.datasets_to_test]]     
         if  self.test_config.modality_remove is not None:
-                self.database_config.channels[self.datasets_to_test] = [modality for modality in self.database_config.channels[self.datasets_to_test] if modality != self.test_config.modality_remove]           
+                self.database_config.channels[self.datasets_to_test] = [modality for modality in self.database_config.channels[self.datasets_to_test] if modality not in self.test_config.modality_remove]           
 
 
     def initialize_metrics(self):
@@ -89,7 +89,7 @@ class ModelTester:
             self.best_metric_epoch[dataset] = -1
 
     def create_val_loader(self, dataset):
-        val_size = self.database_config.total_size[dataset] - self.database_config.train_size[dataset]
+        val_size = self.database_config.val_size[dataset]
         images = sorted(glob(os.path.join(self.database_config.img_path[dataset], "*.*")))
         segs = sorted(glob(os.path.join(self.database_config.seg_path[dataset], "*.*")))
         self.val_loader[dataset] = create_test_val_loader(
@@ -108,9 +108,9 @@ class ModelTester:
     def load_model(self):
         if self.test_config.model_net_type == "unet_deep":
             if self.test_config.single_slot:
-                model = Unet_deep(in_channels=1, out_channels=1).to(self.device)
+                model = Unet_deep(in_channels=1,out_channels=1,invariant_channel=False).to(self.device)
             else:
-                model = Unet_deep(in_channels=len(self.total_modalities), out_channels=1).to(self.device)
+                model = Unet_deep(in_channels=len(self.total_modalities), out_channels=1,invariant_channel=self.test_config.invariant_layers).to(self.device)
 
         elif self.test_config.model_net_type == "unet_old":
             if self.test_config.single_slot:
@@ -173,20 +173,12 @@ class ModelTester:
                 roi_size = (self.cropped_input_size[0], self.cropped_input_size[1], self.cropped_input_size[2])
                 sw_batch_size = 1
 
-                def model_wrapper(x):
-                    outputs = model(x)
-                    # If model returns a tuple of (main_output, aux_output)
-                    if isinstance(outputs, tuple):
-                        return outputs[0]  # Return only the main output
-                    return outputs
-
-                val_outputs = sliding_window_inference(input_data, roi_size, sw_batch_size, model_wrapper)
-
-                # self.current_sample_logit_predictions.append(val_outputs[0])
-
-                val_outputs = [self.post_trans(i) for i in decollate_batch(val_outputs)]
-
-                self.current_sample_logit_predictions.append(val_outputs[0])
+               
+                val_output = sliding_window_inference(input_data, roi_size, sw_batch_size, model)
+                val_outputs = [self.post_trans(i) for i in decollate_batch(val_output)]
+                self.current_sample_logit_predictions.append(val_output[0])
+                
+               
 
                 # add the val output to a dictionary with the combination as the key and the val output as the value.
                 
@@ -195,6 +187,9 @@ class ModelTester:
                 self.sensitivity_metric(y_pred=val_outputs, y=label)
                 self.precision_metric(y_pred=val_outputs, y=label)
                 self.IOU_metric(y_pred=val_outputs, y=label)
+
+                
+            
 
                 if self.test_config.save_segs:
                     file_save_path = self.test_config.save_path + str(steps) + "_" + str(current_dice) + ".nii.gz"
@@ -206,7 +201,7 @@ class ModelTester:
                 
                 steps += 1
 
-            #self.validate_outputs[f'{combination}'] = self.current_sample_logit_predictions
+            self.validate_outputs[f'{combination}'] = self.current_sample_logit_predictions
 
             metric[dataset]["dice"] = self.dice_metric.aggregate().item()
             metric[dataset]["sensitivity"] = self.sensitivity_metric.aggregate()[0].item()
@@ -218,6 +213,10 @@ class ModelTester:
             self.IOU_metric.reset()
 
             print(f'\n  mdice: {np.round(metric[dataset]["dice"], 4)}\n ')
+            print(f'\n  sensitivity: {np.round(metric[dataset]["sensitivity"], 4)}\n ')
+            print(f'\n  precision: {np.round(metric[dataset]["precision"], 4)}\n ')
+            print(f'\n  IOU: {np.round(metric[dataset]["IOU"], 4)}\n ')
+
 
             self.mean_dice_comb.append([modality_list, (np.round(metric[dataset]["dice"], 4))])
 
@@ -226,7 +225,10 @@ class ModelTester:
         print("Total modalities: ", self.total_modalities)
 
         dataset = self.args.datasets_to_test
-        self.channel_map[dataset] = utils.map_channels(self.database_config.channels[dataset], self.total_modalities, rand_assign=self.rand_assign)
+        if self.rand_assign:
+            self.channel_map[dataset] = utils.rand_assign_channels(self.database_config.channels[dataset], self.total_modalities)
+        else:
+            self.channel_map[dataset] = utils.map_channels(self.database_config.channels[dataset], self.total_modalities, rand_assign=self.rand_assign)
         print("channel map:", dataset, self.channel_map[dataset])
 
         print("Testing: ", dataset)
@@ -335,16 +337,6 @@ class ModelTester:
 
 
 
-
-
-
-
-
-
-
-
- 
-
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
@@ -369,26 +361,174 @@ if __name__ == "__main__":
 
     ####################
 
-    args.datasets_to_test = 'ATLAS' #'TBI' # dataset for testing
-    args.modalities_to_test = "0"#"0_1_2_3"       # numeric order of modalities
-    args.test_all_combinations = 0
+    args.datasets_to_test = 'ISLES2022'
+    args.modalities_to_test = "0_1" #ic order of modalities
+    args.test_all_combinations = 1
     args.device_id = 0
-    args.trained_on = "ISLES2022_TBI_BRATS_MSSEG_ATLAS" #DATASETS the model was trained on
+    args.trained_on = "BRATS_MSSEG_ATLAS_WMH_TBI" #DATASETS the model was trained on
     #########################
 
-    checkpoint1 =['models/WMH_PRELIM_TEST/_model_remove:_FLAIR/TBI_ISLES2022_BRATS_MSSEG_ATLAS/2025-05-27_22-03/WMH_PRELIM_TEST_random_drop_True_2025-05-27_22-03_Epoch_599.pth'] #['models/WMH_PRELIM_TEST/_model_remove:_None/TBI_WMH_BRATS_MSSEG_ATLAS/2025-06-07_02-37/WMH_PRELIM_TEST_random_drop_True_2025-06-07_02-37_Epoch_199.pth']
-    for file in checkpoint1:
-        tester = ModelTester(args,file)
-        x=tester.run()
-        x,y = tester.return_dictionary_and_label()
-        # analyze_and_aggregate_predictions(x, y)
 
-       
+    #### Shuffle the channels ####
+    #checkpoint1 = ['models/WMH_PRELIM_TEST/_model_remove:_None/TBI_WMH_BRATS_MSSEG_ATLAS/2025-06-13_19-14/WMH_PRELIM_TEST_random_drop_True_2025-06-13_19-14_Epoch_599.pth']
+
+    #### STANDARD MODEL ####
+
+    #checkpoint1 = ['models/BASELINE/_model_remove:_None/TBI_WMH_BRATS_MSSEG_ATLAS/2025-06-12_15-01/WMH_PRELIM_TEST_random_drop_True_2025-06-12_15-01_Epoch_599.pth']
 
 
-#channels["ISLES"] = ["FLAIR", "T1", "T2","DWI"]  
+
+
+    ### INVARIANAT CHANNEL  AND INVARIANT LAYER ###
+    
+    #checkpoint1 = ['models/WMH_PRELIM_TEST/_model_remove:_None/TBI_WMH_BRATS_MSSEG_ATLAS/2025-06-16_23-33/WMH_PRELIM_TEST_random_drop_True_2025-06-16_23-33_Epoch_599.pth']
+
+    #######  SINGLE CHANNEL MODEL ######
+    #checkpoint1 = ['models/WMH_PRELIM_TEST/_model_remove:_FLAIR/TBI_ISLES2022_BRATS_MSSEG_ATLAS/2025-06-20_15-14/WMH_PRELIM_TEST_random_drop_False_2025-06-20_15-14_Epoch_599.pth']
+
+    ### Invariant channel ####
+    # checkpoint1 =  ['models/from_arc/2025-06-22_14-49/ARC_STUFF_random_drop_True_2025-06-22_14-49_Epoch_549.pth']
+    checkpoint1 = ['models/from_arc/_model_remove:_None/TBI_WMH_BRATS_MSSEG_ATLAS/2025-06-22_15-46/ARC_STUFF_random_drop_True_2025-06-22_15-46_Epoch_549.pth']
+
    
+   
+    single_slot_model = False
+    if not single_slot_model: 
+        for file in checkpoint1:
+            tester = ModelTester(args,file)
+            x=tester.run()
+            x,y = tester.return_dictionary_and_label()
+            
 
+
+
+
+  
+    # ensembling predictions for single slot model 
+
+    elif single_slot_model:
+
+        def ensemble_across_modalities(prediction_dict, threshold=0.5):
+            """
+            Ensembles predictions across modalities for each sample index.
+
+            Args:
+                prediction_dict (dict): keys are modalities, values are lists of predictions (length N).
+                threshold (float): threshold for binarization.
+
+            Returns:
+                list: ensembled predictions for each sample index.
+            """
+            num_samples = len(next(iter(prediction_dict.values())))
+            modalities = list(prediction_dict.keys())
+            ensembled_predictions = []
+
+            for idx in range(num_samples):
+                # Collect predictions for this sample from all modalities
+                preds = [prediction_dict[mod][idx] for mod in modalities]
+                # Stack: shape [num_modalities, ...]
+                stacked = torch.stack(preds, dim=0)
+                # Apply sigmoid to convert logits to probabilities [0, 1]
+                probabilities = torch.sigmoid(stacked)
+                # Average probabilities across modalities
+                mean_prob = torch.mean(probabilities, dim=0)
+                # Final threshold to get binary prediction
+                final_pred = (mean_prob > threshold).float()
+                ensembled_predictions.append(final_pred)
+                
+                # Clear intermediate tensors
+                del preds, stacked, probabilities, mean_prob, final_pred
+            
+            return ensembled_predictions
+
+
+        all_predictions = {}
+        all_labels = None  # Only store labels once
+        
+        # Get the number of modalities to test
+        modalities = args.modalities_to_test.split("_")
+        
+        for i in range(len(modalities)):
+            print(f"\nProcessing modality {i+1}/{len(modalities)}")
+            args.modalities_to_test = str(i)
+            args.test_all_combinations = 0
+            
+            for file in checkpoint1:
+                tester = ModelTester(args, file)
+                tester.run()
+                x, y = tester.return_dictionary_and_label()
+                
+                # Initialize the list if this is the first time for this modality
+                key = f'[{i}]'
+                if key not in all_predictions:
+                    all_predictions[key] = []
+                
+                # Move predictions to CPU and store
+                cpu_predictions = [pred.cpu() for pred in list(x.values())[0]]
+                all_predictions[key].extend(cpu_predictions)
+                
+                # Only store labels once (they're the same for all modalities)
+                if all_labels is None:
+                    all_labels = [label.cpu() for label in y]
+                
+                # Clear GPU memory
+                del tester, x, y, cpu_predictions
+                torch.cuda.empty_cache()
+                
+                print(f"GPU memory after modality {i}: {torch.cuda.memory_allocated()/1e9:.2f} GB")
+        
+        print("\nEnsembling predictions...")
+        
+        # Move predictions back to GPU for ensembling (one at a time)
+        device = torch.device(f"cuda:{args.device_id}")
+        
+        # Convert all_predictions to GPU tensors for ensembling
+        for key in all_predictions:
+            all_predictions[key] = [pred.to(device) for pred in all_predictions[key]]
+        
+        final_predictions = ensemble_across_modalities(all_predictions)
+        
+        # Calculate Dice scores for ensembled predictions
+        def calculate_dice_scores(predictions, labels):
+            """
+            Calculates Dice scores for each patient.
+            """
+            from monai.metrics import DiceMetric
+            
+            # Create DiceMetric once outside the loop for efficiency
+            dice_metric = DiceMetric(include_background=True, reduction="mean", get_not_nans=False)
+            dice_scores = []
+            
+            # Loop through each prediction and label pair
+            for i, (pred, label) in enumerate(zip(predictions, labels)):
+                # Move to GPU for calculation
+                pred = pred.to(device, dtype=torch.float32)
+                label = label.to(device, dtype=torch.float32)
+                
+                # Calculate Dice for this sample
+                dice_score = dice_metric(pred.unsqueeze(0), label.unsqueeze(0))
+                dice_scores.append(dice_score.item())
+                
+                # Reset metric for next calculation
+                dice_metric.reset()
+                
+                # Clear from GPU
+                del pred, label
+                
+            return np.array(dice_scores)
+        
+        # Calculate Dice scores
+        dice_scores = calculate_dice_scores(final_predictions, all_labels)
+        
+        print(f"\n=== Ensemble Results ===")
+        for i, score in enumerate(dice_scores):
+            print(f"Patient {i}: Dice = {score:.4f}")
+        print(f"Mean Ensemble Dice: {np.mean(dice_scores):.4f}")
+        print(f"Std Ensemble Dice: {np.std(dice_scores):.4f}")
+        
+        # Final cleanup
+        del all_predictions, all_labels, final_predictions
+        torch.cuda.empty_cache()
 
 
 

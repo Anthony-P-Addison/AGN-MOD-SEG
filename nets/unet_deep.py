@@ -10,21 +10,25 @@ class res_unet(nn.Module):
 
     def __init__(self,
         in_channels: int,
+        invariant_channel:bool,
         out_channels:int = 1,
         last_layer_conv_only:bool = True,
-        invariant_channel: bool =False,
         
     ) -> None:
         super().__init__()
 
-        print("RES_UNET INIT with Deeper Invariant Channel")
+        if invariant_channel:
+            print("RES_UNET INIT WITH Extra Invariant Layers")
+        elif not invariant_channel:
+            print("RES_UNET INIT WITHOUT Extra Invariant Layers")
+
         dropout = 0.2
         self.invariant_channel_enabled = invariant_channel
-        invariant_out_channels = 8
-        self.invariant_out_channels = invariant_out_channels
-
-    
+       
         if self.invariant_channel_enabled:
+
+            invariant_out_channels = 8
+            self.invariant_out_channels = invariant_out_channels
             
             self.invariant_stream = nn.Sequential(
                 ResidualUnit(spatial_dims=3, in_channels=1, out_channels=8, strides=1, kernel_size=3, subunits=1, dropout=dropout),
@@ -83,7 +87,7 @@ class res_unet(nn.Module):
 
         else:
             modality_features = self.conv_1(x)
-            fused_features = modality_features
+            fused_features = modality_features 
             
 
         down1 = self.down_conv_1(fused_features)
@@ -109,12 +113,13 @@ class res_unet(nn.Module):
         return up_out_4
 
 
-class AuxHeadWithPreproc(nn.Module):
-    def __init__(self, invariant_stream):
-        super().__init__()
-        self.invariant_stream = invariant_stream  # existing nn.Sequential
-        self.final_conv = Convolution(spatial_dims=3,in_channels=8,out_channels=1,strides=1,kernel_size=3,dropout=0.2,conv_only=True)
-    def forward(self, x):
-        return self.final_conv(x)
+# class AuxHeadWithPreproc(nn.Module):
+#     def __init__(self, invariant_stream):
+#         super().__init__()
+#         self.invariant_stream = invariant_stream  # existing nn.Sequential
+#         self.final_conv = Convolution(spatial_dims=3,in_channels=8,out_channels=1,strides=1,kernel_size=3,dropout=0.2,conv_only=True)
+#     def forward(self, x):
+#         return self.final_conv(x)
+
 
 

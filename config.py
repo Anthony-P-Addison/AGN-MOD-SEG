@@ -7,8 +7,8 @@ from datetime import datetime
 
 class Training_config():
 
-    wandb_active:bool = False
-    epoch:int  = 700
+    wandb_active:bool = True
+    epoch:int  = 600
     workers:int = 2 # numworker
     train_batch_size: int = 2  # 4 
     val_interval:int = 8 # the number of epochs between the validation   # 4 
@@ -18,33 +18,33 @@ class Training_config():
     cropped_input_size:tuple = (96,96,96) # (128, 128, 128)
     # lr_config
     drop_learning_rate:bool = True
-    drop_learning_rate_epoch:int = 400 # 150 # epoch at which to decrease the learning rate
+    drop_learning_rate_epoch:int =350      #50epoch at which to decrease the learning rate
     drop_learning_rate_value:float = 1e-5
     # pre trained model:
     load_pre_trained_model:bool = False  # if true will load pre-train model  
-    load_model_path:Path =  'models/Mixup/_model_remove:_None/MSSEG_TBI_BRATS_WMH_ATLAS/2025-02-21_23-40/Mixup_random_drop_True_2025-02-21_23-40_Epoch_149.pth'   ##"models/modality_invariant_slot/WMH_MSSEG/modality_invariant_slot_random_drop_1WMH_MSSEG_TOTAL_AVERAGE.pth"  # path to model .pt file
-    modality_invar_finetune: str = None #'FLAIR'
+    load_model_path:Path =  'models/WMH_PRELIM_TEST/_model_remove:_FLAIR/TBI_ISLES2022_BRATS_MSSEG_ATLAS/2025-06-30_12-04/WMH_PRELIM_TEST_random_drop_True_2025-06-30_12-04_Epoch_49.pth'
 
     random_drop:int = 1 # 1 for to be dropped and 0 for not to be dropped. 
 
     ######### slot allocation #############
-    domain_invariant_slot:bool = False
 
-    contrast_augmentation: bool = False
     mixup :bool = False
     gin_mix = False
     gin_ipa: str = 'GIN_IPA'   # gin
-    rand_assign_channels:bool = False
     Two_domain_invariant_slot:bool = False     # TODO: see if the presence of an extra slot can help training
     single_slot:bool = False
-    modality_remove: str = 'FLAIR' # 'FLAIR'#'T1' #None    # the modality to be removed (useful for testing invariant slot on this modality). None if no modality to be dropped 
+    modality_remove = None # Can be: str, list, or None. Single modality (str) or multiple modalities (list) to remove. None if no modality to be dropped 
     #### admin  ####
     project_name:str = "WMH_PRELIM_TEST"   # wandb project name:   # all_in_one   # shuffle_slots  # modality_invariant_slot  # Mixup
     model_save_path:str = "models/" + project_name + "/_model_remove:_" + str(modality_remove) + "/" # path to save the model
     
     
     ### Layers in model specific to domain invariant slot ###
-    domain_invariant_layers: bool = False
+    domain_invariant_layers:bool = False
+    domain_invariant_slot:bool = False
+    contrast_augmentation: bool = False
+    rand_assign_channels:bool = False    
+   
 
 
 class Database_config():
@@ -69,15 +69,15 @@ class Database_config():
     train_size = {}
     # size for each database
     # training set size
-    train_size["BRATS"] = 50 #444  # 50
-    train_size["ATLAS"] = 50  #459   # 50
+    train_size["BRATS"] = 444 #444  # 50
+    train_size["ATLAS"] = 459  #459   # 50
     train_size["MSSEG"] = 37   # 37 
-    train_size["ISLES"] =1 #19   
+    train_size["ISLES"] =1  #19
     train_size["WMH"] = 42
-    train_size["TBI"] = 50   #156  # 50
+    train_size["TBI"] = 156   #156  # 50
     train_size["VOETS2"] = 3
-    train_size["ISLES2022"] = 50 #175    #50
-    train_size["TUMOUR2"] = 0  
+    train_size["ISLES2022"] = 175 #175    #50
+    train_size["TUMOUR2"] = 1 
     train_size["VESTIB_S"] = 0
     total_size = {}
     total_size["BRATS"] = 484
@@ -152,18 +152,18 @@ class Database_config():
 class Test_config():
     save_segs:bool = False  # True to save the segmentation outputs
     save_path:Path = "save_segs/"  # save niftis generated
-    model_file_path:Path = 'models/Mixup/_model_remove:_None/ATLAS_MSSEG_TBI_BRATS_WMH/2025-02-15_19-10/Mixup_random_drop_TrueATLAS_MSSEG_TBI_BRATS_WMH2025-02-15_19-10_BEST_AVERAGE.pth'#'models/Mixup/_model_remove:_FLAIR/MSSEG_BRATS_ATLAS_TBI_ISLES/2025-02-04_23-08/Mixup_random_drop_TrueMSSEG_BRATS_ATLAS_TBI_ISLES2025-02-04_23-08_BEST_AVERAGE.pth'  #models/new_test_BRATS_ATLAS_WMH_MSSEG_TBI_random_drop_0_Epoch_599.pth' #'models/Train_BRATS_TBI_ATLAS_MSSEG_WMH.pth' # "models/new_test_BRATS_ATLAS_WMH_MSSEG_TBI_random_drop_0_checkpoint_Epoch_599.pt"  # "models/MSSEG/_random_drop_0_2024-12-04_16-15_checkpoint_Epoch_99.pt" #"models/MSSEG/rand_slot_allocation_random_drop_0_2024-12-09_16-01_checkpoint_Epoch_99.pt"
+    #model_file_path:Path = 'models/Mixup/_model_remove:_None/ATLAS_MSSEG_TBI_BRATS_WMH/2025-02-15_19-10/Mixup_random_drop_TrueATLAS_MSSEG_TBI_BRATS_WMH2025-02-15_19-10_BEST_AVERAGE.pth'#'models/Mixup/_model_remove:_FLAIR/MSSEG_BRATS_ATLAS_TBI_ISLES/2025-02-04_23-08/Mixup_random_drop_TrueMSSEG_BRATS_ATLAS_TBI_ISLES2025-02-04_23-08_BEST_AVERAGE.pth'  #models/new_test_BRATS_ATLAS_WMH_MSSEG_TBI_random_drop_0_Epoch_599.pth' #'models/Train_BRATS_TBI_ATLAS_MSSEG_WMH.pth' # "models/new_test_BRATS_ATLAS_WMH_MSSEG_TBI_random_drop_0_checkpoint_Epoch_599.pt"  # "models/MSSEG/_random_drop_0_2024-12-04_16-15_checkpoint_Epoch_99.pt" #"models/MSSEG/rand_slot_allocation_random_drop_0_2024-12-09_16-01_checkpoint_Epoch_99.pt"
     model_net_type: str = "unet_deep"    # 'unet_old', 'unet_deep' # the type of the pre-train model
-    num_modalities_trained_on: int = 8 # the number of modalities included in training
+    num_modalities_trained_on: int = 7 # the number of modalities included in training
     #: dict[str,list[int]] = {"VOETS2":[3,5,4],"BRATS":[1,3,4,5], "ATLAS":[3], "MSSEG":[1,3,4,5,0], "ISLES":[1,3,5,0], "TBI":[1,3,5,2], "WMH":[1,3]} #The allocated channel index of the modalities(each channel) in the testing databases (start from 0) For example "ATLAS": [3] means the T1 modality in ATLAS will be allocated to the forth channel "VOETS2":[1,5],
     
-    # Slot allocation
-    rand_assign:bool = False  # True to randomly assign the channels to the model
-    domain_invariant_slot:bool = True
+    # Slot 
+    rand_assign:bool = False # True to randomly assign the channels to the model
+    domain_invariant_slot:bool =  True
     single_slot:bool = False
-    modality_remove:str = None   #'T1'   # Modlality completed removed during test in dataloader. 
-
-    modality_rem_train: str ='FLAIR' # 'DWI' # the modality that was removed during training and now want to test in the invariant slot. 
+    modality_remove = 'DWI' #Can be: str, list, or None. Modalities to be completely removed during test in dataloader. 
+    invariant_layers:bool = False
+    modality_rem_train: str = 'ADC' # the modality that was removed during training and now want to test in the invariant slot.
 
 
 
@@ -172,7 +172,7 @@ class Finetune_config:
     epoch:int = 600
     workers:int = 2
     train_batch_size:int = 2
-    val_interval:int = 8
+    val_interval:int = 4
     lr:float = 1e-5
     model_type:str = "UNET"
     cropped_input_size:list = [96, 96, 96]
@@ -182,17 +182,21 @@ class Finetune_config:
    
     # model_save_path
     modality_remove:str = None  # the modality to be removed (useful for testing invariant slot on this modality). None if no modality to be dropped
-    project_name:str = "Fine_Tune_MICCAI"   # wandb project name:   # all_in_one   # shuffle_slots  # modality_invariant_slot
-    model_save_path:str = "models/" + "finetune_checkpoints/"   # path to save the model
+    project_name:str = "UPPER_BOUND_FINETUNE"   # wandb project name:   # all_in_one   # shuffle_slots  # modality_invariant_slot
+    model_save_path:str = "models/" + project_name + "/" # path to save the model
     wandb_report:bool = True
 
     # add new modality to invar channel, trained from previous model
-    new_mod_finetune:str = 'FLAIR'     # modality to be added to the invar channel for finetuning
-    modality_remove_training_set: str = 'FLAIR'  # the modality to be removed from the training set of pre trained model. None if no modality to be dropped, 
+    new_mod_finetune:str = None  # modality to be added to the invar channel for finetuning
+    modality_remove_training_set: str = None  # the modality to be removed from the training set of pre trained model. None if no modality to be dropped, 
    
 
     # add invar channel, train from scratch
-    add_channel_to_pre_trained_model:bool = False  
+    add_invar_channel_to_pre_trained_model:bool = False
+    add_invar_layers_to_pre_trained_model:bool = False
+
+    invariant_layers:bool = False
+
 
 
 
@@ -200,31 +204,36 @@ class Finetune_config:
 
 class Augmentation_config:
     #Brain Tissue Augmentations
-    prob_brain_invert: float = 0.5   # 0.5
-    prob_brain_mixup: float = 0   # 0 
-    prob_brain_scale_shift: bool =True
+    prob_brain_invert: float = 0.5 # 0.5
+    prob_brain_mixup: float = 0.5# 0  or 0.5
+    prob_brain_scale_shift: bool = True
 
     brain_factor_multiply: tuple = (0.8, 1.2)
     brain_factor_intensity: tuple = (-0.2, 0.2)
 
     #Pathology Tissue Augmentations
-    prob_pathology_switch: float = 0.75  # 0.75
-    prob_pathology_invert: float = 0.5 # 0.5 
+    prob_pathology_switch: float = 0.75 # 0.75
+    prob_pathology_invert: float = 0.5  # 0.5 
     prob_pathology_mixup: float = 0.5 # 0.5   # these are my values. 
-    prob_tumor_scale_shift: bool =True
+    prob_tumor_scale_shift: bool = True
 
     tumor_factor_multiply: tuple = (0.8, 1.2)
     tumor_factor_intensity: tuple = (-0.2, 0.2)
 
     #uniform augmentations apply same probability to both pathology and the healthy brain tissue,
+
+    uniform_augs: bool = False
+    #####
     uniform_scale_shift: bool = False
-    uniform_mix_up: bool = False
+    uniform_mix_up: float = 0
+    uniform_invert: float = 0
+
+
+
+
+
+
     
-
-
-  
-
-
 
 
 def save_config_file(model_save_path):

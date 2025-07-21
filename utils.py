@@ -8,6 +8,17 @@ import nibabel as nib
 from monai.transforms import  Compose,EnsureChannelFirst
 from monai.data import ImageDataset, DataLoader
 from augment_utils import mixup1_augmentation, mixup_data_causality, spatial_contrast_aug
+from nets.residual_block_identity import ResidualUnit_changed as ResidualUnit
+from nets.unet_deep import Convolution
+import torch.nn as nn
+
+def rand_assign_channels(dataset_modalities: list[int], total_modalities: list[str])-> list[int]:
+    """Randomly assign channels to the batch"""
+    num_to_assign = len(dataset_modalities)
+    all_indices = list(range(len(total_modalities)))
+    assigned_indices = random.sample(all_indices, num_to_assign)
+    return assigned_indices
+
 
 
 def map_channels(dataset_channels: list[str], total_modalities: list[str],rand_assign: bool,) -> list[int]:
@@ -81,6 +92,7 @@ def rand_set_channels_to_zero_with_invar(
     """Randomly set channels to zero and handle invariant channel with optional augmentations"""
     all_modalities_remaining = []
     all_modalities_dropped = []
+    
     # Keep original data for augmentations
     original_batch = batch_img_data.clone()
     # Working copy for modifications
@@ -247,53 +259,7 @@ def rand_set_channels_to_zero_with_invar(
             
         all_modalities_dropped.append(modalities_dropped)
         all_modalities_remaining.append(modalities_remaining)
-    ##### --- Track modalities used for training (not dropped) ---##########
-
-    # # Initialize counters if they don't exist
-    # if not hasattr(rand_set_channels_to_zero_with_invar, 'modality_used_counter'):
-    #     rand_set_channels_to_zero_with_invar.modality_used_counter = {}
-    #     rand_set_channels_to_zero_with_invar.total_iterations = 0
-
-    # if not hasattr(rand_set_channels_to_zero_with_invar, 'combination_used_counter'):
-    #     rand_set_channels_to_zero_with_invar.combination_used_counter = {}
-
-    # # Increment total iterations
-    # rand_set_channels_to_zero_with_invar.total_iterations += 1
-
-    # # Count used modalities and combinations
-    # for i, modalities in enumerate(modalities_remain):
-    #     # Individual modality usage
-    #     for mod_idx in modalities:
-    #         mod_name = dataset_modalities[mod_idx]
-    #         if mod_name not in rand_set_channels_to_zero_with_invar.modality_used_counter:
-    #             rand_set_channels_to_zero_with_invar.modality_used_counter[mod_name] = 0
-    #         rand_set_channels_to_zero_with_invar.modality_used_counter[mod_name] += 1
-
-    #     # Combination usage
-    #     used_mods = [dataset_modalities[j] for j in sorted(modalities)]
-    #     combo_str = '+'.join(used_mods) if used_mods else 'None'
-    #     if combo_str not in rand_set_channels_to_zero_with_invar.combination_used_counter:
-    #         rand_set_channels_to_zero_with_invar.combination_used_counter[combo_str] = 0
-    #     rand_set_channels_to_zero_with_invar.combination_used_counter[combo_str] += 1
-
-    # # Print statistics every 10 iterations
-    # if rand_set_channels_to_zero_with_invar.total_iterations % 30 == 0:
-    #     total_samples = rand_set_channels_to_zero_with_invar.total_iterations * batch_img_data.shape[0]
-
-    #     print(f"\n--- Modality Used Statistics (after {rand_set_channels_to_zero_with_invar.total_iterations} iterations) ---")
-    #     for mod_name, count in rand_set_channels_to_zero_with_invar.modality_used_counter.items():
-    #         use_percentage = (count / total_samples) * 100
-    #         print(f"  {mod_name}: used {count} times ({use_percentage:.2f}%)")
-    #     print("---------------------------------------------------\n")
-
-    #     print(f"--- Used Modality Combinations (after {rand_set_channels_to_zero_with_invar.total_iterations} iterations) ---")
-    #     print(f"{'Combination':<30} | {'Count':<10}")
-    #     print("-" * 45)
-    #     for combo, count in sorted(rand_set_channels_to_zero_with_invar.combination_used_counter.items(), key=lambda x: -x[1]):
-    #         print(f"{combo:<30} | {count:<10}")
-    #     print("---------------------------------------------------\n")
-
-    #############################################################################
+    
     
     return all_modalities_dropped, all_modalities_remaining, working_batch
 
@@ -381,30 +347,123 @@ def modality_select_invar(dataset: list, modality: str) -> list:
     return updated_modalities
 
 
-def add_input_to_pre_trained(model:dict)-> dict:
+def add_invar_input_to_pre_trained(model:dict)-> dict:
 
     """Add additional input channel to the first layer of a pre trained model"""
 
     #input size of first layer
     input_size = model['conv_1.conv.unit0.conv.weight'].shape[1]
-    print(f'Input channels before update: {model["conv_1.conv.unit0.conv.weight"][1][3]}')
+
     print(f'Input channels of model: {input_size}')
     # additinal input channel 
     num_input_channels = input_size + 1
     # create a new Conv3d layer with an additional input channel
-    new_conv = torch.nn.Conv3d(num_input_channels, 16, kernel_size=3, stride=1, padding=1, bias=True)
+    # new_conv = torch.nn.Conv3d(num_input_channels, 7, kernel_size=3, stride=1, padding=1, bias=True)
+    new_conv1 =  ResidualUnit(spatial_dims=3, in_channels=num_input_channels, out_channels=8,strides=1, kernel_size=3, subunits=1, dropout=0.2)
+    new_down_conv1 = Convolution(spatial_dims=3,in_channels=8,out_channels=32,strides=1,kernel_size=3,dropout=0.2)
+    
+      
     # copy the weights from the old conv layer to the new conv layer
     with torch.no_grad():
-        new_conv.weight[:, :input_size, :, :, :] = model['conv_1.conv.unit0.conv.weight']
-        new_conv.bias = torch.nn.Parameter(model['conv_1.conv.unit0.conv.bias'])  # Convert to torch.nn.Parameter
+        new_conv1.conv[0].conv.weight[:input_size, :input_size, :, :, :] = model['conv_1.conv.unit0.conv.weight']
+        new_conv1.conv[0].conv.bias[:input_size] = torch.nn.Parameter(model['conv_1.conv.unit0.conv.bias'])  # Convert to torch.nn.Parameter
+        new_down_conv1.conv.weight[:,:input_size, :, :, :] = model['down_conv_1.conv.weight']
+        new_down_conv1.conv.bias[:] = torch.nn.Parameter(model['down_conv_1.conv.bias'])  # Convert to torch.nn.Parameter
     # replace the old conv layer with the new conv layer in the model
-    model['conv_1.conv.unit0.conv.weight'] = new_conv.weight
-    model['conv_1.conv.unit0.conv.bias'] = new_conv.bias
+    model['conv_1.conv.unit0.conv.weight'] = new_conv1.conv[0].conv.weight
+    model['conv_1.conv.unit0.conv.bias'] = new_conv1.conv[0].conv.bias
+    model['down_conv_1.conv.weight'] = new_down_conv1.conv.weight
+    model['down_conv_1.conv.bias'] = new_down_conv1.conv.bias
 
     print(f'Input channels of model after update: {model["conv_1.conv.unit0.conv.weight"].shape[1]}')
     print(f'Input channels of model after update: {model["conv_1.conv.unit0.conv.weight"][1][4]}')
 
+
     return model
+
+
+def add_invar_layers_to_pre_trained(model:dict, invariant_out_channels: int = 8, dropout: float = 0.2)-> dict:
+    """Modify model dict to match unet_deep architecture with invariant channels enabled"""
+
+    # Get original layer dimensions (includes invariant channel)
+    original_input_size = model['conv_1.conv.unit0.conv.weight'].shape[1]
+    conv1_out_channels = model['conv_1.conv.unit0.conv.weight'].shape[0]
+    down_conv1_out_channels = model['down_conv_1.conv.weight'].shape[0]
+    
+    # In unet_deep: modality_channels = in_channels - 1 (excluding invariant channel)
+  
+    modality_channels = original_input_size
+
+    
+
+    print(f'Original input channels: {original_input_size}')
+    print(f'Modality channels : {modality_channels}')
+
+
+    print(f'Converting to unet_deep architecture...')
+    
+   
+    #Create invariant stream exactly like unet_deep
+    invariant_stream = nn.Sequential(
+            ResidualUnit(spatial_dims=3, in_channels=1, out_channels=8, strides=1, kernel_size=3, subunits=1, dropout=dropout),
+            Convolution(spatial_dims=3,in_channels=8,out_channels=16,strides=1,kernel_size=3,dropout=0.2),
+            Convolution(spatial_dims=3,in_channels=16,out_channels=invariant_out_channels,strides=1,kernel_size=3,dropout=0.2))
+        
+    
+    # Create new down_conv_1 for concatenated features (modality_features + invariant_features)
+    downstream_in_channels = modality_channels + invariant_out_channels
+    new_down_conv1 = Convolution(spatial_dims=3, in_channels=downstream_in_channels, out_channels=32, strides=2, kernel_size=3, dropout=dropout)
+    
+    with torch.no_grad():
+        # Add invariant stream layers to model state dict
+
+        new_down_conv1.conv.weight[:,:modality_channels, :, :, :] = model['down_conv_1.conv.weight']
+        new_down_conv1.conv.bias[:] = torch.nn.Parameter(model['down_conv_1.conv.bias']) 
+
+        model['invariant_stream.0.conv.unit0.conv.weight'] = invariant_stream[0].conv[0].conv.weight
+        model['invariant_stream.0.conv.unit0.conv.bias'] = invariant_stream[0].conv[0].conv.bias
+        # Add the specific ADN component mentioned in error
+        
+        model['invariant_stream.0.conv.unit0.adn.A.weight'] = invariant_stream[0].conv[0].adn.A.weight
+        
+        # Layer 1: Convolution (8 -> 16) - add only required parameters
+        model['invariant_stream.1.conv.weight'] = invariant_stream[1].conv.weight
+        model['invariant_stream.1.conv.bias'] = invariant_stream[1].conv.bias
+        # Add the specific ADN component mentioned in error
+        
+        model['invariant_stream.1.adn.A.weight'] = invariant_stream[1].adn.A.weight
+        
+        # Layer 2: Convolution (16 -> invariant_out_channels) - add only required parameters
+        model['invariant_stream.2.conv.weight'] = invariant_stream[2].conv.weight
+        model['invariant_stream.2.conv.bias'] = invariant_stream[2].conv.bias
+        # Add the specific ADN component mentioned in error
+        
+        model['invariant_stream.2.adn.A.weight'] = invariant_stream[2].adn.A.weight
+
+        
+        # Update down_conv_1 to accept concatenated features (modality_channels + invariant_out_channels -> 32)
+        # Copy existing weights for the modality channels part
+        new_down_conv1.conv.weight[:, :modality_channels, :, :, :] = model['down_conv_1.conv.weight'][:, :modality_channels, :, :, :]
+        # The additional invariant channels (last 8 channels) will be randomly initialized
+        
+        model['down_conv_1.conv.weight'] = new_down_conv1.conv.weight
+        model['down_conv_1.conv.bias'] = new_down_conv1.conv.bias
+  
+    
+    print(f'✓ Kept conv_1 unchanged: {modality_channels} -> {modality_channels} (modality channels)')
+    print(f'✓ Added invariant_stream: 1 -> 8 -> 16 -> {invariant_out_channels}')
+    print(f'✓ Updated down_conv_1: {downstream_in_channels} -> 32 (concatenated features)')
+    print(f'✓ Architecture flow: modalities({modality_channels}) -> conv_1({modality_channels}) \\')
+    print(f'                                                                        concat({downstream_in_channels}) -> down_conv_1(32)')
+    print(f'                      invariant(1) -> invariant_stream({invariant_out_channels}) /')
+    
+    return model 
+
+
+
+
+
+
 
 
 def create_test_val_loader(
@@ -435,9 +494,81 @@ def create_test_val_loader(
     return val_loader
 
 
+def extract_all_layer_parameters(layer, prefix=""):
+    """Extract all parameters from a MONAI layer including ADN components"""
+    params = {}
+    
+    # Get all named parameters from the layer
+    for name, param in layer.named_parameters():
+        full_name = f"{prefix}.{name}" if prefix else name
+        params[full_name] = param
+    
+    # Get all named buffers (like running_mean, running_var, num_batches_tracked)
+    for name, buffer in layer.named_buffers():
+        full_name = f"{prefix}.{name}" if prefix else name
+        params[full_name] = buffer
+    
+    return params
+
+
 if __name__ == "__main__":
     #test functions here 
 
     # single slot test 
     
     single_slot(torch.rand((2, 4, 128, 128, 128)))
+
+
+    #TODO: make a funciton for analysing modalities used during training. 
+        
+    ##### --- Track modalities used for training (not dropped) ---##########
+
+    # # Initialize counters if they don't exist
+    # if not hasattr(rand_set_channels_to_zero_with_invar, 'modality_used_counter'):
+    #     rand_set_channels_to_zero_with_invar.modality_used_counter = {}
+    #     rand_set_channels_to_zero_with_invar.total_iterations = 0
+
+    # if not hasattr(rand_set_channels_to_zero_with_invar, 'combination_used_counter'):
+    #     rand_set_channels_to_zero_with_invar.combination_used_counter = {}
+
+    # # Increment total iterations
+    # rand_set_channels_to_zero_with_invar.total_iterations += 1
+
+    # # Count used modalities and combinations
+    # for i, modalities in enumerate(modalities_remain):
+    #     # Individual modality usage
+    #     for mod_idx in modalities:
+    #         mod_name = dataset_modalities[mod_idx]
+    #         if mod_name not in rand_set_channels_to_zero_with_invar.modality_used_counter:
+    #             rand_set_channels_to_zero_with_invar.modality_used_counter[mod_name] = 0
+    #         rand_set_channels_to_zero_with_invar.modality_used_counter[mod_name] += 1
+
+    #     # Combination usage
+    #     used_mods = [dataset_modalities[j] for j in sorted(modalities)]
+    #     combo_str = '+'.join(used_mods) if used_mods else 'None'
+    #     if combo_str not in rand_set_channels_to_zero_with_invar.combination_used_counter:
+    #         rand_set_channels_to_zero_with_invar.combination_used_counter[combo_str] = 0
+    #     rand_set_channels_to_zero_with_invar.combination_used_counter[combo_str] += 1
+
+    # # Print statistics every 10 iterations
+    # if rand_set_channels_to_zero_with_invar.total_iterations % 30 == 0:
+    #     total_samples = rand_set_channels_to_zero_with_invar.total_iterations * batch_img_data.shape[0]
+
+    #     print(f"\n--- Modality Used Statistics (after {rand_set_channels_to_zero_with_invar.total_iterations} iterations) ---")
+    #     for mod_name, count in rand_set_channels_to_zero_with_invar.modality_used_counter.items():
+    #         use_percentage = (count / total_samples) * 100
+    #         print(f"  {mod_name}: used {count} times ({use_percentage:.2f}%)")
+    #     print("---------------------------------------------------\n")
+
+    #     print(f"--- Used Modality Combinations (after {rand_set_channels_to_zero_with_invar.total_iterations} iterations) ---")
+    #     print(f"{'Combination':<30} | {'Count':<10}")
+    #     print("-" * 45)
+    #     for combo, count in sorted(rand_set_channels_to_zero_with_invar.combination_used_counter.items(), key=lambda x: -x[1]):
+    #         print(f"{combo:<30} | {count:<10}")
+    #     print("---------------------------------------------------\n")
+
+    #############################################################################
+
+
+
+

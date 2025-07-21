@@ -17,7 +17,7 @@ import config
 import datetime
 
 
-def main(args:argparse.Namespace,k_fold: None):
+def main(args,k_fold: None):
 
     now = datetime.datetime.now()
     date = now.strftime("%Y-%m-%d_%H-%M")
@@ -30,8 +30,10 @@ def main(args:argparse.Namespace,k_fold: None):
     train_config=config.Finetune_config()
     randomly_drop = bool(args.randomly_drop)
     Database_config=config.Database_config()
-    add_channel_to_pre_trained_model = train_config.add_channel_to_pre_trained_model
+    add_invar_channel_to_pre_trained_model= train_config.add_invar_channel_to_pre_trained_model
+    add_invar_layers_to_pre_trained_model= train_config.add_invar_layers_to_pre_trained_model
     cropped_input_size = train_config.cropped_input_size
+   
     datasets_trained_initially=args.datasets_trained_initially.split("_")
     modality_remove = train_config.modality_remove
     epochs=train_config.epoch
@@ -95,8 +97,8 @@ def main(args:argparse.Namespace,k_fold: None):
     for dataset in datasets_trained_initially:
         total_modalities = total_modalities.union(set(channels[dataset]))
     
-    if "FLAIR" in total_modalities:
-        total_modalities.remove("FLAIR")
+    # if "DWI"in total_modalities:
+    #     total_modalities.remove("DWI")
    
     total_modalities = sorted(list(total_modalities))
     
@@ -112,7 +114,7 @@ def main(args:argparse.Namespace,k_fold: None):
     print("Data_size", data_size)
 
     
-    if add_channel_to_pre_trained_model or train_config.new_mod_finetune:
+    if add_invar_channel_to_pre_trained_model or train_config.new_mod_finetune:
         total_modalities.append(train_config.new_mod_finetune)                  
 
 
@@ -131,7 +133,7 @@ def main(args:argparse.Namespace,k_fold: None):
  
     # get dataloader
     train_config.modality_remove = None
-    train_loaders, val_loader,data_loader_map = get_dataloader(train_config, Database_config, [dataset], cropped_input_size, data_size,channels,k_fold=k_fold)
+    train_loaders, val_loader,data_loader_map = get_dataloader(train_config, Database_config, [dataset], cropped_input_size, data_size,channels,k_fold=k_fold,dataset_use="Train")
 
 
 
@@ -152,23 +154,39 @@ def main(args:argparse.Namespace,k_fold: None):
     # load pre-trained weights
     if train_config.model_type == "UNET":
         print("TRAINING WITH UNET")
-        in_channel = len(total_modalities)
-        model = unet_deep(in_channels=in_channel).to(device)
-        optimizer = torch.optim.Adam(model.parameters(), lr=train_config.lr)
+        in_channel = len(total_modalities) 
         epoched = 0
         print("LOADING MODEL: ", args.load_model_finetune_path)
         # add slot to the pre-trained model to finetune unseen modality.
-        if add_channel_to_pre_trained_model:
+        if add_invar_channel_to_pre_trained_model:
+
+            invariant_channel  = False
             load = torch.load(
                 args.load_model_finetune_path,
                 map_location={"cuda:0": cuda_id, "cuda:1": cuda_id},
             )
-            checkpoint = utils.add_input_to_pre_trained(load)
+            checkpoint = utils.add_invar_input_to_pre_trained(load)
+
+        elif add_invar_layers_to_pre_trained_model:
+            invariant_channel = True
+            load = torch.load(
+                args.load_model_finetune_path,
+                map_location={"cuda:0": cuda_id, "cuda:1": cuda_id},
+            )
+            checkpoint = utils.add_invar_layers_to_pre_trained(load)
+      
         else:
+            invariant_channel = False
             checkpoint = torch.load(
                 args.load_model_finetune_path,
                 map_location={"cuda:0": cuda_id, "cuda:1": cuda_id},
             )
+        
+
+        model = unet_deep(in_channels=in_channel,invariant_channel=invariant_channel).to(device)
+        optimizer = torch.optim.Adam(model.parameters(), lr=train_config.lr)
+        
+        
         model.load_state_dict(checkpoint)
 
     # defined loss function
@@ -225,7 +243,29 @@ def main(args:argparse.Namespace,k_fold: None):
                     else:
                         label = batch[label_index].to(device)                         
                     input_data = torch.from_numpy(np.zeros((batch[img_index].shape[0],len(total_modalities),cropped_input_size[0],cropped_input_size[1],cropped_input_size[2]),dtype=np.float32))
-                    input_data[:,channel_map["BRATS"],:,:,:] = batch[img_index]
+                    
+                    # When using invariant layers, handle FLAIR separately
+                    modality = None
+                    if add_invar_layers_to_pre_trained_model and modality in channels[dataset]:
+                        # Find FLAIR index in the dataset channels
+                        flair_idx = channels[dataset].index(modality)
+                        
+                        # Map non-FLAIR modalities to regular channels
+                        non_flair_channels = [ch for ch in channels[dataset] if ch != modality]
+                        non_flair_channel_map = utils.map_channels(non_flair_channels, total_modalities[:-1], rand_assign=False)
+                        
+                        # Place non-FLAIR data in regular modality channels
+                        non_flair_data = torch.cat([batch[img_index][:, :flair_idx], batch[img_index][:, flair_idx+1:]], dim=1)
+                        input_data[:, non_flair_channel_map, :, :, :] = non_flair_data
+                        
+                        # Place FLAIR data in the invariant channel (last position)
+                        input_data[:, -1, :, :, :] = batch[img_index][:, flair_idx, :, :, :]
+                        
+                        # print(f"✓ FLAIR placed in invariant channel (position {len(total_modalities)-1})")
+                        # print(f"✓ Other modalities {non_flair_channels} placed in positions {non_flair_channel_map}")
+                    else:
+                        # Original behavior for non-invariant models
+                        input_data[:,channel_map["BRATS"],:,:,:] = batch[img_index]
                     input_data = input_data.to(device)           
                     out = model(input_data)
                     outputs.append(out)
@@ -245,7 +285,29 @@ def main(args:argparse.Namespace,k_fold: None):
                             )  # ATLAS WILL ALWAYS BE ONE CHANNEL (no drop) 
 
                     input_data = torch.from_numpy(np.zeros((batch[img_index].shape[0],len(total_modalities),cropped_input_size[0],cropped_input_size[1],cropped_input_size[2]),dtype=np.float32))
-                    input_data[:,channel_map[dataset],:,:,:] = batch[img_index]
+                    
+                    # When using invariant layers, handle FLAIR separately
+                    modality = None
+                    if add_invar_layers_to_pre_trained_model and modality in channels[dataset]:
+                        # Find FLAIR index in the dataset channels
+                        flair_idx = channels[dataset].index(modality)
+                        
+                        # Map non-FLAIR modalities to regular channels
+                        non_flair_channels = [ch for ch in channels[dataset] if ch != modality]
+                        non_flair_channel_map = utils.map_channels(non_flair_channels, total_modalities[:-1], rand_assign=False)
+                        
+                        # Place non-FLAIR data in regular modality channels
+                        non_flair_data = torch.cat([batch[img_index][:, :flair_idx], batch[img_index][:, flair_idx+1:]], dim=1)
+                        input_data[:, non_flair_channel_map, :, :, :] = non_flair_data
+                        
+                        # Place FLAIR data in the invariant channel (last position)
+                        input_data[:, -1, :, :, :] = batch[img_index][:, flair_idx, :, :, :]
+                        
+                        # print(f"✓ FLAIR placed in invariant channel (position {len(total_modalities)-1})")
+                        # print(f"✓ Other modalities {non_flair_channels} placed in positions {non_flair_channel_map}")
+                    else:
+                        # Original behavior for non-invariant models
+                        input_data[:,channel_map[dataset],:,:,:] = batch[img_index]
                     input_data = input_data.to(device)                    
                     label = batch[label_index].to(device)
                     out = model(input_data)
@@ -320,7 +382,35 @@ def main(args:argparse.Namespace,k_fold: None):
                     for val_data in val_loader[dataset]:
                         # batch = val_data[loader_index]
                         input_data = torch.from_numpy(np.zeros((1,len(total_modalities),val_data[0].shape[2],val_data[0].shape[3],val_data[0].shape[4]),dtype=np.float32))
-                        input_data[:,channel_map[dataset],:,:,:] = val_data[0]
+                        
+                        # When using invariant layers, handle FLAIR separately in validation too
+                        modality = None
+                        if add_invar_layers_to_pre_trained_model and modality in channels[dataset]:
+                            # Find FLAIR index in the dataset channels
+                            flair_idx = channels[dataset].index(modality)
+                            
+                            # Map non-FLAIR modalities to regular channels
+                            non_flair_channels = [ch for ch in channels[dataset] if ch != modality]
+                            non_flair_channel_map = utils.map_channels(non_flair_channels, total_modalities[:-1], rand_assign=False)
+                            
+                            # Place non-FLAIR data in regular modality channels
+                            if flair_idx == 0:
+                                non_flair_data = val_data[0][:, 1:, :, :, :]
+                            elif flair_idx == val_data[0].shape[1] - 1:
+                                non_flair_data = val_data[0][:, :-1, :, :, :]
+                            else:
+                                non_flair_data = torch.cat([val_data[0][:, :flair_idx, :, :, :], val_data[0][:, flair_idx+1:, :, :, :]], dim=1)
+                            
+                            input_data[:, non_flair_channel_map, :, :, :] = non_flair_data
+                            
+                            # Place FLAIR data in the invariant channel (last position)
+                            input_data[:, -1, :, :, :] = val_data[0][:, flair_idx, :, :, :]
+                            
+                            # print(f"✓ VAL: FLAIR placed in invariant channel (position {len(total_modalities)-1})")
+                            # print(f"✓ VAL: Other modalities {non_flair_channels} placed in positions {non_flair_channel_map}")
+                        else:
+                            # Original behavior for non-invariant models
+                            input_data[:,channel_map[dataset],:,:,:] = val_data[0]
                         input_data = input_data.to(device)
                         if dataset == "BRATS" and Database_config.BRATS_two_channel_seg:
                             label = val_data[1][:,[0],:,:,:].to(device)                      
@@ -389,10 +479,10 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     args.device_id = 0
-    args.datasets = "ISLES"
+    args.datasets = "WMH"
     args.randomly_drop = 1
-    args.load_model_finetune_path = 'models/WMH_PRELIM_TEST/_model_remove:_FLAIR/TBI_ISLES2022_BRATS_MSSEG_ATLAS/2025-05-27_22-03/WMH_PRELIM_TEST_random_drop_True_2025-05-27_22-03_Epoch_599.pth'
-    args.datasets_trained_initially = 'ISLES2022_MSSEG_BRATS_ATLAS_TBI'  
+    args.load_model_finetune_path = 'models/UPPER_BOUND_FINETUNE/2025-07-03_15-19/WMH_PRELIM_TEST_random_drop_True_2025-07-03_15-19_Epoch_599.pth'
+    args.datasets_trained_initially = 'TBI_ISLES2022_BRATS_MSSEG_ATLAS'  
 
     
     main(args,k_fold=None)

@@ -359,13 +359,14 @@ def create_dataloader(
 
 
 def get_dataloader(
-    train_config: Training_config,
+    train_config: None,
     database_config: Database_config,
     datasetlist: list[str],
     cropped_input_size: list[int],
     data_size: int,
     channels_copy: dict,
     k_fold: dict,
+    dataset_use: str
 ):
     """ Get the dataloader for the training and validation data for each dataset in the datasetlist"""
 
@@ -379,7 +380,12 @@ def get_dataloader(
     mask_path = database_config.mask_path
     # get dataloader
     for dataset in datasetlist:
-        print("Training: ", dataset)
+
+        if dataset_use == "Train":
+            print("Training: ", dataset)        
+        elif dataset_use == "Val ONLY":
+            print("Validation ONLY: ", dataset)  
+        
         val_size = database_config.total_size[dataset] - database_config.train_size[dataset]
 
         train_size = database_config.train_size[dataset] 
@@ -432,7 +438,7 @@ def get_modalities_drop(
     return [
         i
         for i, modality in enumerate(modalities_present)
-        if modality == remove_modality
+        if modality  == remove_modality
     ]
 
 
@@ -453,8 +459,10 @@ def create_test_val_loader(
 
     # image augmentation through spatial cropping to size and by randomly rotating
 
-    channels_to_remove = get_modalities_drop(dataset, channels, modality_remove)
+   
+    channels_to_remove = get_modalities_drop_test(dataset, channels, modality_remove)
 
+    
     val_imtrans = Compose([EnsureChannelFirst(), RemoveChannels(channels_to_remove)])
     val_segtrans = Compose([EnsureChannelFirst()])
     # create a training data loader
@@ -474,6 +482,37 @@ def create_test_val_loader(
 
 
 ########################################################################
+
+
+def get_modalities_drop_test(
+    dataset: str, modalities_present: list[str], remove_modality: list[str]
+) -> list[int]:
+    """Get the modalities to drop from the image tensor as list of integers"""
+
+    if remove_modality is None:
+        return None
+
+    if remove_modality in modalities_present and len(modalities_present) == 1:
+        raise ValueError(
+            f"Modality {remove_modality} is the only modality present in dataset {dataset}"
+        )
+
+    if remove_modality not in modalities_present:
+        print(f"Modality {remove_modality} not present in dataset {dataset}")
+
+    return [
+        i
+        for i, modality in enumerate(modalities_present)
+        if modality  in  remove_modality
+    ]
+
+
+
+
+
+
+
+
 
 
 if "__main__" == __name__:
