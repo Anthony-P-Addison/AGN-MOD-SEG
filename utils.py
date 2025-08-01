@@ -7,7 +7,7 @@ from itertools import combinations
 import nibabel as nib
 from monai.transforms import  Compose,EnsureChannelFirst
 from monai.data import ImageDataset, DataLoader
-from augment_utils import mixup1_augmentation, mixup_data_causality, spatial_contrast_aug
+from augment_utils import spatial_contrast_aug
 from nets.residual_block_identity import ResidualUnit_changed as ResidualUnit
 from nets.unet_deep import Convolution
 import torch.nn as nn
@@ -18,8 +18,6 @@ def rand_assign_channels(dataset_modalities: list[int], total_modalities: list[s
     all_indices = list(range(len(total_modalities)))
     assigned_indices = random.sample(all_indices, num_to_assign)
     return assigned_indices
-
-
 
 def map_channels(dataset_channels: list[str], total_modalities: list[str],rand_assign: bool,) -> list[int]:
     """map specific dataset channels to total modalities
@@ -80,9 +78,6 @@ def rand_set_channels_to_zero_with_invar(
     batch_img_data: torch.Tensor,
     mask_data: torch.Tensor,
     domain_invariant: bool,
-    mixup: bool = False,
-    gin_mix: bool = False,
-    gin_ipa: str = None,
     contrast_augmentation: bool = False,
     batch_label_data: torch.Tensor = None,
     device_id: str = None,
@@ -133,77 +128,7 @@ def rand_set_channels_to_zero_with_invar(
         if domain_invariant and len(dataset_modalities) > 2:
             invar = None
           
-            if mixup:
-                # Mixup augmentation logic
-                if len(modalities_dropped) == 0 and len(modalities_remaining) >= 2:
-                    # Mix two remaining channels
-                    channels = random.sample(modalities_remaining, 2)
-                    invar = mixup1_augmentation(
-                        original_batch[i, channels, :, :],
-                        all_mod_dropped=False,
-                        one_mod_dropped=False,
-                        two_not_dropped=True,
-                        mod_3=False
-                    )
-                elif len(modalities_dropped) == 1 and len(modalities_remaining) >= 1:
-                    # Mix one dropped with one remaining
-                    channels = random.sample(modalities_remaining, 1) + random.sample(modalities_dropped, 1)
-                    invar = mixup1_augmentation(
-                        original_batch[i, channels, :, :],
-                        all_mod_dropped=False,
-                        one_mod_dropped=True,
-                        two_not_dropped=False,
-                        mod_3=False
-                    )
-                elif len(modalities_dropped) == 2:
-                    # Mix two dropped channels
-                    channels = random.sample(modalities_dropped, 2)
-                    invar = mixup1_augmentation(
-                        original_batch[i, channels, :, :],
-                        all_mod_dropped=True,
-                        one_mod_dropped=False,
-                        two_not_dropped=False,
-                        mod_3=False
-                    )
-                elif len(modalities_dropped) > 2:
-                    # Mix three dropped channels
-                    channels = random.sample(modalities_dropped, 3)
-                    invar = mixup1_augmentation(
-                        original_batch[i, channels, :, :],
-                        all_mod_dropped=False,
-                        one_mod_dropped=False,
-                        two_not_dropped=False,
-                        mod_3=True
-                    )
-                    
-            elif gin_mix:
-                # GIN augmentation logic
-                if len(modalities_dropped) == 0 and len(modalities_remaining) >= 1:
-                    # Augment one remaining channel
-                    channel = random.sample(modalities_remaining, 1)
-                    invar = mixup_data_causality(
-                        original_batch[i, channel, :, :],
-                        device_id=device_id,
-                        aug_type=gin_ipa,
-                        all_mod_dropped=False,
-                        one_mod_dropped=False,
-                        two_not_dropped=True,
-                        mod_3=False
-                    )
-                elif len(modalities_dropped) >= 1:
-                    # Augment one dropped channel
-                    channel = random.sample(modalities_dropped, 1)
-                    invar = mixup_data_causality(
-                        original_batch[i, channel, :, :],
-                        device_id=device_id,
-                        aug_type=gin_ipa,
-                        all_mod_dropped=True,
-                        one_mod_dropped=False,
-                        two_not_dropped=False,
-                        mod_3=False
-                    )
-                    
-            elif contrast_augmentation:
+            if contrast_augmentation:
                 random_number = random.random()
                 
                 # number below is probability of not using augmentations
@@ -284,6 +209,7 @@ def create_net(model_file_path,model_net_type,model_modalities_trained_on, devic
         model.eval()
     return model
 
+
 def create_modality_combinations(modalities: list):
     
     modality_combinations = []
@@ -310,16 +236,6 @@ def create_single_channel_UNET_input(batch, modalities, dataset_name,model_modal
     return input_data
 
 
-# def create_UNET_input(batch, modalities, dataset_name, model_modalities_trained_on, model_channel_map):
-#     """Create input data for UNET model"""
-#     # Initialize input_data tensor with zeros
-#     input_data = torch.from_numpy(np.zeros((1, model_modalities_trained_on, batch[0].shape[2], batch[0].shape[3], batch[0].shape[4]), dtype=np.float32))
-
-#     # Copy data into input_data based on model_channel_map
-#     input_data[:, model_channel_map[dataset_name], :, :, :] = batch[0][:, modalities, :, :, :]
-
-
-#     return input_data
 
 
 def create_UNET_input_quicktest(batch, modalities, channel_map, model_modalities_trained_on):
@@ -347,9 +263,14 @@ def modality_select_invar(dataset: list, modality: str) -> list:
     return updated_modalities
 
 
+
+
+####### Randomly initiating Agnostic channel and Agnostic channel + Agnostic pathway #######
+
+
 def add_invar_input_to_pre_trained(model:dict)-> dict:
 
-    """Add additional input channel to the first layer of a pre trained model"""
+    """Add additional input channel (randomly initialised weights) to the first layer of a pre trained model"""
 
     #input size of first layer
     input_size = model['conv_1.conv.unit0.conv.weight'].shape[1]
@@ -383,7 +304,7 @@ def add_invar_input_to_pre_trained(model:dict)-> dict:
 
 
 def add_invar_layers_to_pre_trained(model:dict, invariant_out_channels: int = 8, dropout: float = 0.2)-> dict:
-    """Modify model dict to match unet_deep architecture with invariant channels enabled"""
+    """Modify model dict to match unet_deep architecture with invariant channels enabled: used for finetuning the model with designated agnostic channel"""
 
     # Get original layer dimensions (includes invariant channel)
     original_input_size = model['conv_1.conv.unit0.conv.weight'].shape[1]
@@ -461,11 +382,6 @@ def add_invar_layers_to_pre_trained(model:dict, invariant_out_channels: int = 8,
 
 
 
-
-
-
-
-
 def create_test_val_loader(
     val_size: int,
     images,
@@ -494,21 +410,44 @@ def create_test_val_loader(
     return val_loader
 
 
-def extract_all_layer_parameters(layer, prefix=""):
-    """Extract all parameters from a MONAI layer including ADN components"""
-    params = {}
+
+
+def lr_schedule(epochs, optimizer):
+    """Learning rate scheduler function that implements warmup and decay.
     
-    # Get all named parameters from the layer
-    for name, param in layer.named_parameters():
-        full_name = f"{prefix}.{name}" if prefix else name
-        params[full_name] = param
+    Args:
+        current_epoch (int): Current training epoch
+        epochs (int): Total number of epochs
+        optimizer (torch.optim.Optimizer): The optimizer to create scheduler for
+        
+    Returns:
+        scheduler: LambdaLR scheduler
+    """
+    def lr_lambda(current_epoch):
+        # Warm up phase (first 50 epochs)
+        if current_epoch < 50:
+            return (float(current_epoch) + 1) / float(max(1, 50))
+        # Constant learning rate phase
+        elif 50 <= current_epoch <= 350:
+            return 1.0
+        # First decay phase
+        elif 350 < current_epoch <= 400:
+            return 0.4
+        # Second decay phase
+        elif 400 < current_epoch <= 450:
+            return 0.1
+        # Final decay phase
+        else:
+            return max(0.0, 0.1 - (0.1 * (current_epoch - 450) / float(max(1, epochs - 450))))
     
-    # Get all named buffers (like running_mean, running_var, num_batches_tracked)
-    for name, buffer in layer.named_buffers():
-        full_name = f"{prefix}.{name}" if prefix else name
-        params[full_name] = buffer
-    
-    return params
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
+    return scheduler
+
+
+### TESTING HELD OUT DATASTES WITH HELD OUT MODALITEIS AS YOU TRAIN TO OBSERVE LEARNING PROGREESS OF AGNOSTIC CHANNEL #####
+
+
+
 
 
 if __name__ == "__main__":

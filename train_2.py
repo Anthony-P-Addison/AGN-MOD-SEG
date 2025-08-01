@@ -17,11 +17,11 @@ import datetime
 from dataloader import get_dataloader
 import copy
 from tqdm import tqdm
-import random
-import optuna
 
 
-def main(train_config,aug_config,database_config,k_fold,args,channels_copy,optuna_trial=None):
+
+
+def main(train_config,aug_config,database_config,k_fold,args,channels_copy):
 
 
     torch.multiprocessing.set_sharing_strategy("file_system")
@@ -39,11 +39,10 @@ def main(train_config,aug_config,database_config,k_fold,args,channels_copy,optun
     randomly_drop = bool(train_config.random_drop)
     single_slot = train_config.single_slot
     wandb_active = train_config.wandb_active
-    mixup = train_config.mixup
-    gin_mix = train_config.gin_mix
     contrast_augmentation = train_config.contrast_augmentation
     lr_sched = train_config.lr_sched
-
+    held_out_datasets = train_config.held_out_datasets
+    dropped_modality = train_config.modality_remove
     cropped_input_size = train_config.cropped_input_size
     epochs = train_config.epoch
     
@@ -141,9 +140,13 @@ def main(train_config,aug_config,database_config,k_fold,args,channels_copy,optun
     validate_data_only = True
 
     if validate_data_only:
+        # Temporarily store the original value
+        original_modality_remove = train_config.modality_remove
+        # Set to None for validation data loading
         train_config.modality_remove = None
-
-        WMH_loader,val_only_loader,data_laod = get_dataloader(train_config, database_config,["ATLAS","TUMOUR2"],cropped_input_size , data_size,channels_copy,k_fold,dataset_use = "Val ONLY")
+        WMH_loader,val_only_loader,data_laod = get_dataloader(train_config, database_config,held_out_datasets,cropped_input_size , data_size,channels_copy,k_fold,dataset_use = "Val ONLY")
+        # Restore the original value
+        train_config.modality_remove = original_modality_remove
     
 
     # initialize GPU
@@ -221,7 +224,7 @@ def main(train_config,aug_config,database_config,k_fold,args,channels_copy,optun
     best_metric = {}
     best_metric_epoch = {}
     best_avg_dice = 0
-    for dataset in datasetlist:
+    for dataset in datasetlist + held_out_datasets:
         best_metric[dataset] = -1
         best_metric_epoch[dataset] = -1
 
@@ -248,28 +251,9 @@ def main(train_config,aug_config,database_config,k_fold,args,channels_copy,optun
                 channels[dataset],invar_ratio= 0)
 
 
-
     if lr_sched:
+        scheduler = utils.lr_schedule(epochs=epochs,optimizer=optimizer)
 
-        def lr_lambda(current_epoch):
-            # warm up the learning rate.
-            if current_epoch < 50:
-                return (float(current_epoch) + 1) / float(max(1, 50))
-            elif 50 <= current_epoch <= 350:
-                return 1.0
-            elif 350 < current_epoch <= 400:
-                return 0.4
-            elif 400 < current_epoch <= 450:
-                return 0.1
-            else:
-                #return max(0.0, 0.1 - (((current_epoch - 450) / float(max(1, epochs - 450)*0.1))))
-                return max(0.0, 0.1 - (0.1 * (current_epoch - 450) / float(max(1, epochs - 450))))
-
-                #return max(0.0, 0.5 * (1.0 + math.cos(math.pi * (current_epoch - warmup_epochs) / max(1, args.E - warmup_epochs))))
-        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
-
-     
-    
     ##training##
 
     for epoch in tqdm(range(epoched, epochs)):
@@ -308,7 +292,7 @@ def main(train_config,aug_config,database_config,k_fold,args,channels_copy,optun
                     if randomly_drop:
                         modalities_dropped,modalities_remaining, batch[img_index] = (
                             utils.rand_set_channels_to_zero_with_invar(
-                                channels["BRATS"], batch[img_index],mask_data = batch[mask_index],domain_invariant=domain_invariant_slot,mixup =mixup,gin_mix = gin_mix, batch_label_data=batch[label_index],device_id = args.device_id,gin_ipa=train_config.gin_ipa,contrast_augmentation=contrast_augmentation,combination_map=combination_map["BRATS"],augmentation_config=aug_config
+                                channels["BRATS"], batch[img_index],mask_data = batch[mask_index],domain_invariant=domain_invariant_slot, batch_label_data=batch[label_index],device_id = args.device_id,contrast_augmentation=contrast_augmentation,combination_map=combination_map["BRATS"],augmentation_config=aug_config
                             )
                         )
                         for i in range(batch[label_index].shape[0]):
@@ -384,7 +368,7 @@ def main(train_config,aug_config,database_config,k_fold,args,channels_copy,optun
                         if randomly_drop:
                             modalities_dropped,modalities_remaining, batch[img_index] = (
                                 utils.rand_set_channels_to_zero_with_invar(
-                                    channels["TBI"], batch[img_index],mask_data = batch[mask_index],domain_invariant=domain_invariant_slot,mixup = mixup,gin_mix = gin_mix, batch_label_data=batch[label_index], device_id= args.device_id,gin_ipa=train_config.gin_ipa,contrast_augmentation=contrast_augmentation,combination_map=combination_map["TBI"],augmentation_config=aug_config
+                                    channels["TBI"], batch[img_index],mask_data = batch[mask_index],domain_invariant=domain_invariant_slot, batch_label_data=batch[label_index], device_id= args.device_id,contrast_augmentation=contrast_augmentation,combination_map=combination_map["TBI"],augmentation_config=aug_config
                                 )
                         )
                         # this part is only relevant for TBI when doing multi channel segmentation with modality drop 
@@ -468,7 +452,7 @@ def main(train_config,aug_config,database_config,k_fold,args,channels_copy,optun
                     else:
                         if randomly_drop:
                             modalities_dropped, modalities_remaining, batch[img_index] = utils.rand_set_channels_to_zero_with_invar(
-                                channels[dataset], batch[img_index],mask_data = batch[mask_index],domain_invariant=domain_invariant_slot,mixup = mixup, gin_mix = gin_mix, batch_label_data = batch[label_index],device_id =args.device_id,gin_ipa=train_config.gin_ipa,contrast_augmentation=contrast_augmentation,combination_map=combination_map[dataset],augmentation_config=aug_config
+                                channels[dataset], batch[img_index],mask_data = batch[mask_index],domain_invariant=domain_invariant_slot, batch_label_data = batch[label_index],device_id =args.device_id,contrast_augmentation=contrast_augmentation,combination_map=combination_map[dataset],augmentation_config=aug_config
                             )  # ATLAS WILL ALWAYS BE ONE CHANNEL (no drop)
                         
                         input_data = torch.from_numpy(
@@ -584,108 +568,100 @@ def main(train_config,aug_config,database_config,k_fold,args,channels_copy,optun
                 
                 # Test with all modalities
         
-                if domain_invariant_slot:
+                # if domain_invariant_slot:
                     
-                    for dataset in ["ATLAS","TUMOUR2"]:
+                #     for dataset in ["ATLAS","TUMOUR2"]:
                         
-                        for val_data in val_only_loader[dataset]:
+                #         for val_data in val_only_loader[dataset]:
 
-                            channels[dataset] = channels_copy[dataset]
+                #             channels[dataset] = channels_copy[dataset]
 
-                            channels[dataset] = [x if x != 'T1' else 'invar' for x in channels[dataset]]
+                #             channels[dataset] = [x if x != 'T1' else 'invar' for x in channels[dataset]]
                             
-                            channel_map[dataset] = utils.map_channels(
-                                channels[dataset],
-                                total_modalities,
-                                rand_assign=rand_assign_channels,
-                            )
+                #             channel_map[dataset] = utils.map_channels(
+                #                 channels[dataset],
+                #                 total_modalities,
+                #                 rand_assign=rand_assign_channels,
+                #             )
 
-                            if single_slot:
-                                input_data, _ = utils.single_slot(val_data[0])
-                            else:
-                                input_data = torch.from_numpy(
-                                    np.zeros(
-                                        (
-                                            1,
-                                            len(total_modalities),
-                                            val_data[0].shape[2],
-                                            val_data[0].shape[3],
-                                            val_data[0].shape[4],
-                                        ),
-                                        dtype=np.float32,
-                                    )
-                                )
-                                if domain_invariant_slot:
-                                    input_data[:, channel_map[dataset], :, :, :] = val_data[0]
-                                else:
-                                    input_data[:, channel_map[dataset], :, :, :] = val_data[0]
+                #             if single_slot:
+                #                 input_data, _ = utils.single_slot(val_data[0])
+                #             else:
+                #                 input_data = torch.from_numpy(
+                #                     np.zeros(
+                #                         (
+                #                             1,
+                #                             len(total_modalities),
+                #                             val_data[0].shape[2],
+                #                             val_data[0].shape[3],
+                #                             val_data[0].shape[4],
+                #                         ),
+                #                         dtype=np.float32,
+                #                     )
+                #                 )
+                #                 if domain_invariant_slot:
+                #                     input_data[:, channel_map[dataset], :, :, :] = val_data[0]
+                #                 else:
+                #                     input_data[:, channel_map[dataset], :, :, :] = val_data[0]
 
-                            input_data = input_data.to(device)
-                            label = val_data[1].to(device)
-                            roi_size = (
-                                cropped_input_size[0],
-                                cropped_input_size[1],
-                                cropped_input_size[2],
-                            )
-                            sw_batch_size = 1
+                #             input_data = input_data.to(device)
+                #             label = val_data[1].to(device)
+                #             roi_size = (
+                #                 cropped_input_size[0],
+                #                 cropped_input_size[1],
+                #                 cropped_input_size[2],
+                #             )
+                #             sw_batch_size = 1
 
-                            val_outputs = sliding_window_inference(
-                            input_data, roi_size, sw_batch_size,model
-                            )
-                            val_outputs = [
-                                post_trans(i) for i in decollate_batch(val_outputs)
-                            ]
-                            dice_metric(y_pred=val_outputs, y=label)
-                            sensitivity_metric(y_pred=val_outputs, y=label)
-                            precision_metric(y_pred=val_outputs, y=label)
-                            IOU_metric(y_pred=val_outputs, y=label)
-                        metric[dataset] = {
-                            "dice": dice_metric.aggregate().item(),
-                            "sensitivity": sensitivity_metric.aggregate()[0].item(),
-                            "precision": precision_metric.aggregate()[0].item(),
-                            "IOU": IOU_metric.aggregate().item(),
-                        }
+                #             val_outputs = sliding_window_inference(
+                #             input_data, roi_size, sw_batch_size,model
+                #             )
+                #             val_outputs = [
+                #                 post_trans(i) for i in decollate_batch(val_outputs)
+                #             ]
+                #             dice_metric(y_pred=val_outputs, y=label)
+                #             sensitivity_metric(y_pred=val_outputs, y=label)
+                #             precision_metric(y_pred=val_outputs, y=label)
+                #             IOU_metric(y_pred=val_outputs, y=label)
+                #         metric[dataset] = {
+                #             "dice": dice_metric.aggregate().item(),
+                #             "sensitivity": sensitivity_metric.aggregate()[0].item(),
+                #             "precision": precision_metric.aggregate()[0].item(),
+                #             "IOU": IOU_metric.aggregate().item(),
+                #         }
                     
                     
-                        dice_metric.reset()
+                #         dice_metric.reset()
                     
-                        sensitivity_metric.reset()
-                        precision_metric.reset()
-                        IOU_metric.reset()
-                        if metric[dataset]["dice"] > best_metric.get(dataset, -1):
-                            best_metric[dataset] = metric[dataset]["dice"]
-                            best_metric_epoch[dataset] = epoch + 1
-                        print("current epoch: {} current mean dice {}: {:.4f} best mean dice {}: {:.4f} at epoch {}".format(
-                                epoch + 1,
-                                dataset,
-                                metric[dataset]["dice"],
-                                dataset,
-                                best_metric[dataset],
-                                best_metric_epoch[dataset],
-                            )
-                        )
+                #         sensitivity_metric.reset()
+                #         precision_metric.reset()
+                #         IOU_metric.reset()
+                #         if metric[dataset]["dice"] > best_metric.get(dataset, -1):
+                #             best_metric[dataset] = metric[dataset]["dice"]
+                #             best_metric_epoch[dataset] = epoch + 1
+                #         print("current epoch: {} current mean dice {}: {:.4f} best mean dice {}: {:.4f} at epoch {}".format(
+                #                 epoch + 1,
+                #                 dataset,
+                #                 metric[dataset]["dice"],
+                #                 dataset,
+                #                 best_metric[dataset],
+                #                 best_metric_epoch[dataset],
+                #             )
+                #         )
         
 
                     
-                        ####Report intermediate value to Optuna for pruning########################
-                        if optuna_trial is not None:
-                            step = (epoch + 1) // train_config.val_interval
-                            optuna_trial.report(metric[dataset]["dice"], step)
-                            
-                            if optuna_trial.should_prune():
-                                print(f"Trial pruned at epoch {epoch + 1}, dice: {metric[dataset]['dice']:.4f}")
-                                raise optuna.TrialPruned()
+                
 
-
-                        total_av_dice.append(metric[dataset]["dice"])
+                #         total_av_dice.append(metric[dataset]["dice"])
 
                 
                     
                     ##### Test with only the invariant channel   #####
-                    dice_metric_invar = DiceMetric(include_background=True, reduction="mean")
-                    sensitivity_metric_invar = ConfusionMatrixMetric(metric_name="sensitivity", include_background=True)
-                    precision_metric_invar = ConfusionMatrixMetric(metric_name="precision", include_background=True)
-                    IOU_metric_invar = MeanIoU(include_background=True)
+                    # dice_metric_invar = DiceMetric(include_background=True, reduction="mean")
+                    # sensitivity_metric_invar = ConfusionMatrixMetric(metric_name="sensitivity", include_background=True)
+                    # precision_metric_invar = ConfusionMatrixMetric(metric_name="precision", include_background=True)
+                    # IOU_metric_invar = MeanIoU(include_background=True)
                 
                     
                     # for val_data in val_only_loader["WMH"]:
@@ -754,132 +730,151 @@ def main(train_config,aug_config,database_config,k_fold,args,channels_copy,optun
                     #     )
                     # )
                     
-                    if wandb_active:
-                        wandb.log(
-                            {
-                                "epoch_val": epoch + 1,
-                                "mdice_ATLAS": metric["ATLAS"]["dice"],          # was WMH before
-                                #"mdice_WMH_invar": metric["WMH_invar"]["dice"],
-                                "mdice_TUMOUR2": metric["TUMOUR2"]["dice"], }
-                        )
+                    # if wandb_active:
+                    #     wandb.log(
+                    #         {
+                    #             "epoch_val": epoch + 1,
+                    #             "mdice_ATLAS": metric["ATLAS"]["dice"],          # was WMH before
+                    #             #"mdice_WMH_invar": metric["WMH_invar"]["dice"],
+                    #             "mdice_TUMOUR2": metric["TUMOUR2"]["dice"], }
+                    #     )
 
 
                 #########################################
-                validate_other_modalities = True
-                if epoch> 300:
+             
+            
+                
+                for dataset in [*datasetlist, *held_out_datasets]:
+                    metric[dataset] = {}
                     
-                    if validate_other_modalities:
-                        for dataset in datasetlist:
-                            metric[dataset] = {}
-                            loader_index = data_loader_map[dataset]
-                            for val_data in val_loader[dataset]:
+                    if dataset in held_out_datasets:
+                        channels[dataset] = channels_copy[dataset]
+                        channels[dataset] = [x if x != train_config.modality_remove else 'invar' for x in channels[dataset]]
+                        
+                    
+                    # Choose appropriate loader based on dataset type eitehr held out training or completely held out dataset.
+                    if dataset in held_out_datasets:
+                        current_loader = val_only_loader[dataset]
+                    elif dataset in datasetlist:
+                        current_loader = val_loader[dataset]
 
-                                if single_slot:
-                                    input_data,_ = utils.single_slot(val_data[0])
-                                    
-                                else:
-                                    input_data = torch.from_numpy(
-                                        np.zeros(
-                                            (
-                                                1,
-                                                len(total_modalities),
-                                                val_data[0].shape[2],
-                                                val_data[0].shape[3],
-                                                val_data[0].shape[4],
-                                            ),
-                                            dtype=np.float32,
-                                        )
-                                    )
-                                    if domain_invariant_slot == True:
-                                        # FIXME: TESTING ON ALL MODALITIES INCLUDING INVARIANT SLOT WITH FLAIR
-                                        # input_data[:, channel_map[dataset], :, :, :] = val_data[0]
-                                        input_data[:, channel_map[dataset][:-1], :, :, :] = val_data[0]
-                                    else:
-                                        input_data[:, channel_map[dataset], :, :, :] = val_data[0]
+                    for val_data in current_loader:
+                        
+                        channel_map[dataset] = utils.map_channels(
+                            channels[dataset],
+                            total_modalities,
+                            rand_assign=rand_assign_channels,
+                        )
 
-                                
-                                input_data = input_data.to(device)
-
-                                if dataset == "BRATS" and database_config.BRATS_two_channel_seg:
-                                    label = val_data[1][:, [0], :, :, :].to(device)
-                                elif dataset == "TBI" and TBI_multi_channel_seg:
-                                    label = val_data[1][:,[2],:,:,:].to(device)
-                                
-                                else:
-                                    label = val_data[1].to(device)
-                                roi_size = (
-                                    cropped_input_size[0],
-                                    cropped_input_size[1],
-                                    cropped_input_size[2],
+                        if single_slot:
+                            input_data,_ = utils.single_slot(val_data[0])
+                        
+                        else:
+                            input_data = torch.from_numpy(
+                                np.zeros(
+                                    (
+                                        1,
+                                        len(total_modalities),
+                                        val_data[0].shape[2],
+                                        val_data[0].shape[3],
+                                        val_data[0].shape[4],
+                                    ),
+                                    dtype=np.float32,
                                 )
-                                sw_batch_size = 1
+                            )
+                            if domain_invariant_slot == True:
+                                if dataset in held_out_datasets:
+                                    input_data[:, channel_map[dataset], :, :, :] = val_data[0]
+                                elif dataset in datasetlist:
+                                    input_data[:, channel_map[dataset][:-1], :, :, :] = val_data[0]
+                            else:
+                                input_data[:, channel_map[dataset], :, :, :] = val_data[0]
 
-                                # using sliding window for the whole 3D image
-                                val_outputs = sliding_window_inference(
-                                    input_data, roi_size, sw_batch_size,model
-                                )
-                                val_outputs = [
-                                    post_trans(i) for i in decollate_batch(val_outputs)
-                                ]
-                                # compute metric for current iteration
-                                dice_metric(y_pred=val_outputs, y=label)
-                                sensitivity_metric(y_pred=val_outputs, y=label)
-                                precision_metric(y_pred=val_outputs, y=label)
-                                IOU_metric(y_pred=val_outputs, y=label)
-                            metric[dataset]["dice"] = dice_metric.aggregate().item()
-                            metric[dataset]["sensitivity"] = sensitivity_metric.aggregate()[0].item()
-                            metric[dataset]["precision"] = precision_metric.aggregate()[0].item()
-                            metric[dataset]["IOU"] = IOU_metric.aggregate().item()
-                            dice_metric.reset()
-                            sensitivity_metric.reset()
-                            precision_metric.reset()
-                            IOU_metric.reset()
-                            
-                            if metric[dataset]["dice"] > best_metric[dataset]:
-                                best_metric[dataset] = metric[dataset]["dice"]
-                                best_metric_epoch[dataset] = epoch + 1
-                                if epoch > 1:
-                                    model_save_best_name =  (   
-                                        model_save_path
-                                        +    train_config.project_name
-                                        + "_random_drop_"
-                                        + str(randomly_drop)
-                                        + "_"
-                                        + date
-                                        + "_BEST_"
-                                        + dataset
-                                        + ".pth"
-                                    )
-                                    torch.save(model.state_dict(), model_save_best_name)
-                                    print(f"Saved new best dice model, for {dataset}:_{best_metric[dataset]}")
-                                    print(best_metric[dataset])
+                        
+                        input_data = input_data.to(device)
 
-                                "current epoch: {} current mean dice {}: {:.4f} best mean dice {}: {:.4f} at epoch {}".format(
-                                    epoch + 1,
-                                    dataset,
-                                    metric[dataset]["dice"],
-                                    dataset,
-                                    best_metric[dataset],
-                                    best_metric_epoch[dataset],
-                                )
-                            
-                            
-                            # calculate the average dice across all dataset used
-                            total_av_dice.append(metric[dataset]["dice"])
-                            
-                            if wandb_active:
+                        if dataset == "BRATS" and database_config.BRATS_two_channel_seg:
+                            label = val_data[1][:, [0], :, :, :].to(device)
+                        elif dataset == "TBI" and TBI_multi_channel_seg:
+                            label = val_data[1][:,[2],:,:,:].to(device)
+                        
+                        else:
+                            label = val_data[1].to(device)
+                        roi_size = (
+                            cropped_input_size[0],
+                            cropped_input_size[1],
+                            cropped_input_size[2],
+                        )
+                        sw_batch_size = 1
 
-                                # wandb log
-                                wandb.log(
-                                    {
-                                        "epoch_val": epoch + 1,
-                                        "mdice_" + dataset: metric[dataset]["dice"],
-                                        "sensitivity_" + dataset: metric[dataset]["sensitivity"],
-                                        "precision_" + dataset: metric[dataset]["precision"],
-                                        "mIOU_" + dataset: metric[dataset]["IOU"],
+                        # using sliding window for the whole 3D image
+                        val_outputs = sliding_window_inference(
+                            input_data, roi_size, sw_batch_size,model
+                        )
+                        val_outputs = [
+                            post_trans(i) for i in decollate_batch(val_outputs)
+                        ]
+                        # compute metric for current iteration
+                        dice_metric(y_pred=val_outputs, y=label)
+                        sensitivity_metric(y_pred=val_outputs, y=label)
+                        precision_metric(y_pred=val_outputs, y=label)
+                        IOU_metric(y_pred=val_outputs, y=label)
+                    metric[dataset]["dice"] = dice_metric.aggregate().item()
+                    metric[dataset]["sensitivity"] = sensitivity_metric.aggregate()[0].item()
+                    metric[dataset]["precision"] = precision_metric.aggregate()[0].item()
+                    metric[dataset]["IOU"] = IOU_metric.aggregate().item()
+                    dice_metric.reset()
+                    sensitivity_metric.reset()
+                    precision_metric.reset()
+                    IOU_metric.reset()
+                    
+                    if metric[dataset]["dice"] > best_metric[dataset]:
+                        best_metric[dataset] = metric[dataset]["dice"]
+                        best_metric_epoch[dataset] = epoch + 1
+                        if epoch > 1:
+                            model_save_best_name =  (   
+                                model_save_path
+                                +    train_config.project_name
+                                + "_random_drop_"
+                                + str(randomly_drop)
+                                + "_"
+                                + date
+                                + "_BEST_"
+                                + dataset
+                                + ".pth"
+                            )
+                            torch.save(model.state_dict(), model_save_best_name)
+                            print(f"Saved new best dice model, for {dataset}:_{best_metric[dataset]}")
+                            print(best_metric[dataset])
 
-                                    }
-                                )
+                    print(
+                        "current epoch: {} current mean dice {}: {:.4f} best mean dice {}: {:.4f} at epoch {}".format(
+                            epoch + 1,
+                            dataset,
+                            metric[dataset]["dice"],
+                            dataset,
+                            best_metric[dataset],
+                            best_metric_epoch[dataset],
+                        )
+                    )
+                
+                    
+                    # calculate the average dice across all dataset used
+                    total_av_dice.append(metric[dataset]["dice"])
+                    
+                    if wandb_active:
+
+                        # wandb log
+                        wandb.log(
+                            {
+                                "epoch_val": epoch + 1,
+                                "mdice_" + dataset: metric[dataset]["dice"],
+                                "sensitivity_" + dataset: metric[dataset]["sensitivity"],
+                                "precision_" + dataset: metric[dataset]["precision"],
+                                "mIOU_" + dataset: metric[dataset]["IOU"],
+
+                            }
+                        )
                 # average dice across datasets
                 if len(datasetlist)>1:
                     if np.mean(total_av_dice) > best_avg_dice:
@@ -908,7 +903,6 @@ def main(train_config,aug_config,database_config,k_fold,args,channels_copy,optun
    
 
             
-                
 if __name__ == "__main__":
 
 
@@ -922,9 +916,7 @@ if __name__ == "__main__":
         "--k_fold", help="k_fold cross validation number fo folds", type=int, default=None
     )
 
-    parser.add_argument(
-        "--modality_remove", help="modality to remove", type=str, default=None
-    )
+ 
 
     parser.add_argument(
         "--augmentation", help="augmentation", type=str, default=None
@@ -949,8 +941,9 @@ if __name__ == "__main__":
     #########################
     args = parser.parse_args()
     args.device_id = 1
-    args.datasets =  'TBI_ISLES2022_BRATS_MSSEG_ATLAS'   #'ISLES2022'
-    #args.k_fold = 5
+    args.datasets =  'MSSEG'   #'ISLES2022'
+    
+    
 
   
     ######################################
@@ -1001,7 +994,7 @@ if __name__ == "__main__":
     print(aug_config)
 
    
-    main(train_config,aug_config,database_config,k_fold=None,args = args,channels_copy = channels_copy,optuna_trial=None)
+    main(train_config,aug_config,database_config,k_fold=None,args = args,channels_copy = channels_copy)
 
 
 
