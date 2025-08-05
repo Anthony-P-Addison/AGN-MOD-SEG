@@ -10,26 +10,24 @@ from config import Augmentation_config
 
 def spatial_contrast_aug(
     aug_config: Augmentation_config,
-    channel_add:list,
+    channel_add: list,
     pathology_label: torch.Tensor,
     brain_mask: torch.Tensor,
     batch_img: torch.Tensor,
-    blur_boundary_prob: float = 1,   #   1 
-    blur_sigma_range: tuple = (0.5, 0.5),   # 0.5 0.5 
+    blur_boundary_prob: float = 1,  #   1
+    blur_sigma_range: tuple = (0.5, 0.5),  # 0.5 0.5
     dilation_iterations: int = 1,
-    plot_image: bool = False
-
-
+    plot_image: bool = False,
 ):
     """
     Apply spatial contrast augmentation by modifying intensity in brain and tumor regions,
     followed by optional spatial blurring of image features directly across the tumor boundary.
     Background (non-brain) regions are preserved.
     """
-   
-    # Validate scale shift configuration
-    if aug_config.uniform_scale_shift and (not aug_config.prob_brain_scale_shift or not aug_config.prob_tumor_scale_shift):
-        raise ValueError("When uniform_scale_shift is True, both prob_brain_scale_shift and prob_tumor_scale_shift must be True")
+
+    # # Validate scale shift configuration
+    # if aug_config.uniform_scale_shift and (not aug_config.prob_brain_scale_shift or not aug_config.prob_tumor_scale_shift):
+    #     raise ValueError("When uniform_scale_shift is True, both prob_brain_scale_shift and prob_tumor_scale_shift must be True")
 
     # Track if significant augmentations (beyond scale/shift) have been applied
     significant_aug_applied = False
@@ -55,27 +53,26 @@ def spatial_contrast_aug(
     tumor_factor_intensity = None
 
     # Create a working copy that only contains the brain region initially
-    #working_img = torch.where(brain_mask_bool, img, img) # Start with original brain + background
+    # working_img = torch.where(brain_mask_bool, img, img) # Start with original brain + background
     working_img = img.clone()
     working_pathology_img = img.clone()
 
     if aug_config.uniform_augs:
-        # do evething to working image 
+        # do evething to working image
         if random.random() < aug_config.uniform_mix_up:
             working_img = MixUp(batch_img,working_img,channel_add,brain_mask_bool)
             significant_aug_applied = True  # Mixup is significant
-        
+
         if random.random() < aug_config.uniform_invert:
             working_img = torch.where(brain_mask_bool, working_img * -1.0, working_img)
             significant_aug_applied = True  # Inversion is significant
-        
+
         if random.random() < aug_config.uniform_scale_shift:
             brain_factor_multiply = torch.tensor(random.uniform(*aug_config.brain_factor_multiply), device=img.device, dtype=img.dtype)
             brain_factor_intensity = torch.tensor(random.uniform(*aug_config.brain_factor_intensity), device=img.device, dtype=img.dtype)
             working_img = torch.where(brain_mask_bool, working_img * brain_factor_multiply + brain_factor_intensity, working_img)
             significant_aug_applied = True  # Scale/shift is significant
 
-        
     else:
 
         #### Healthy brain tissue Augmentations ####
@@ -92,14 +89,14 @@ def spatial_contrast_aug(
             significant_aug_applied = True  # Mixup is significant
 
         # --- 3. INTENSITY/CONTRAST | BRAIN TISSUE  ---
-    
+
         # Scale factors relative to the image's statistics
         # brain_factor_intensity = torch.tensor(random.choice([random.uniform(0.1, 0.5), random.uniform(-0.5, -0.1)]), device=img.device, dtype=img.dtype)
         if aug_config.prob_brain_scale_shift:
-         
+
             brain_factor_multiply = torch.tensor(random.uniform(*aug_config.brain_factor_multiply), device=img.device, dtype=img.dtype)
             brain_factor_intensity = torch.tensor(random.uniform(*aug_config.brain_factor_intensity), device=img.device, dtype=img.dtype)
-            
+
             # Apply brain factors to the whole brain region first
             working_img = torch.where(
                 brain_mask_bool,
@@ -109,7 +106,6 @@ def spatial_contrast_aug(
             # Scale/shift is NOT considered significant augmentation
 
         ################### Pathology Brain Tissue Augmentations ###################
-
 
         # --- 0. Pathology Modality Switch (Applied first) ---
         if random.random() < aug_config.prob_pathology_switch:
@@ -152,40 +148,49 @@ def spatial_contrast_aug(
         # --- Spatial Blurring at Tumor Boundary ---
         # Only apply if significant augmentations have been applied
         if significant_aug_applied and random.random() < blur_boundary_prob:
-            tumor_mask_np = tumor_mask_bool[0].cpu().numpy()
-            brain_mask_np = brain_mask_bool[0].cpu().numpy()
-
-            dilated_tumor = ndimage.binary_dilation(
-                tumor_mask_np,
-                iterations=dilation_iterations,
-                border_value=0
+            working_img = lesion_blur(
+                tumor_mask_bool,
+                brain_mask_bool,
+                working_img,
+                blur_sigma_range,
+                dilation_iterations,
+                img,
             )
 
-            eroded_tumor_np = ndimage.binary_erosion(
-                tumor_mask_np,
-                iterations=dilation_iterations,
-                border_value=0
-            )
+            # tumor_mask_np = tumor_mask_bool[0].cpu().numpy()
+            # brain_mask_np = brain_mask_bool[0].cpu().numpy()
 
-            outer_boundary_component_np = dilated_tumor & ~tumor_mask_np
-            inner_boundary_component_np = tumor_mask_np & ~eroded_tumor_np
+            # dilated_tumor = ndimage.binary_dilation(
+            #     tumor_mask_np,
+            #     iterations=dilation_iterations,
+            #     border_value=0
+            # )
 
-            boundary_np = (outer_boundary_component_np | inner_boundary_component_np) & brain_mask_np
+            # eroded_tumor_np = ndimage.binary_erosion(
+            #     tumor_mask_np,
+            #     iterations=dilation_iterations,
+            #     border_value=0
+            # )
 
-            if np.any(boundary_np):
-                boundary_tensor = torch.from_numpy(boundary_np).to(device=img.device)
-                sigma = np.random.uniform(*blur_sigma_range)
+            # outer_boundary_component_np = dilated_tumor & ~tumor_mask_np
+            # inner_boundary_component_np = tumor_mask_np & ~eroded_tumor_np
 
-                for c in range(working_img.shape[0]):
-                    channel_data_np = working_img[c].cpu().numpy()
-                    blurred_channel_np = ndimage.gaussian_filter(channel_data_np, sigma=sigma)
-                    blurred_channel_tensor = torch.from_numpy(blurred_channel_np).to(device=img.device)
+            # boundary_np = (outer_boundary_component_np | inner_boundary_component_np) & brain_mask_np
 
-                    working_img[c] = torch.where(
-                        boundary_tensor,
-                        blurred_channel_tensor,
-                        working_img[c]
-                    )
+            # if np.any(boundary_np):
+            #     boundary_tensor = torch.from_numpy(boundary_np).to(device=img.device)
+            #     sigma = np.random.uniform(*blur_sigma_range)
+
+            #     for c in range(working_img.shape[0]):
+            #         channel_data_np = working_img[c].cpu().numpy()
+            #         blurred_channel_np = ndimage.gaussian_filter(channel_data_np, sigma=sigma)
+            #         blurred_channel_tensor = torch.from_numpy(blurred_channel_np).to(device=img.device)
+
+            #         working_img[c] = torch.where(
+            #             boundary_tensor,
+            #             blurred_channel_tensor,
+            #             working_img[c]
+            #         )
 
     # --- Final Image Assignment and Normalization ---
     augmented_img = working_img
@@ -197,10 +202,23 @@ def spatial_contrast_aug(
     return augmented_img
 
 
-
-
-def plot_augmentation(img, tumor_mask_bool, brain_mask_bool, augmented_img,brain_factor_multiply,brain_factor_intensity,tumor_factor_multiply,tumor_factor_intensity,brain_inversion,tumor_inversion,tumor_channel):
-        # --- Visualization ---
+def plot_augmentation(
+    img,
+    tumor_mask_bool,
+    brain_mask_bool,
+    augmented_img,
+    brain_factor_multiply,
+    brain_factor_intensity,
+    tumor_factor_multiply,
+    tumor_factor_intensity,
+    brain_inversion,
+    tumor_inversion,
+    tumor_channel,
+):
+    """
+    Plot the augmentation parameters and the augmented image.
+    """
+    # --- Visualization ---
     if torch.any(tumor_mask_bool):
         # Convert tensors to numpy for plotting
         img_np = img.cpu().numpy()
@@ -216,29 +234,29 @@ def plot_augmentation(img, tumor_mask_bool, brain_mask_bool, augmented_img,brain
 
         # Original image
         plt.subplot(1, 4, 1)
-        plt.imshow(img_np[0, :, :, slice_idx], cmap='gray')
-        plt.title('Original Image')
-        plt.axis('off')
+        plt.imshow(img_np[0, :, :, slice_idx], cmap="gray")
+        plt.title("Original Image")
+        plt.axis("off")
 
         # Tumor mask overlay
         plt.subplot(1, 4, 2)
-        plt.imshow(img_np[0, :, :, slice_idx],cmap = 'gray')
-        plt.imshow(tumor_mask_np[:, :, slice_idx], alpha=0.3, cmap='Reds')
-        plt.title('Tumor Mask Overlay')
-        plt.axis('off')
+        plt.imshow(img_np[0, :, :, slice_idx], cmap="gray")
+        plt.imshow(tumor_mask_np[:, :, slice_idx], alpha=0.3, cmap="Reds")
+        plt.title("Tumor Mask Overlay")
+        plt.axis("off")
 
         # Brain mask overlay
         plt.subplot(1, 4, 3)
-        plt.imshow(img_np[0, :, :, slice_idx],cmap = 'gray')
-        plt.imshow(brain_mask_np[:, :, slice_idx], alpha=0.3, cmap='Blues')
-        plt.title('Brain Mask Overlay')
-        plt.axis('off')
+        plt.imshow(img_np[0, :, :, slice_idx], cmap="gray")
+        plt.imshow(brain_mask_np[:, :, slice_idx], alpha=0.3, cmap="Blues")
+        plt.title("Brain Mask Overlay")
+        plt.axis("off")
 
         # Augmented image
         plt.subplot(1, 4, 4)
-        plt.imshow(augmented_np[0, :, :, slice_idx], cmap='gray')
-        plt.title('Augmented Image')
-        plt.axis('off')
+        plt.imshow(augmented_np[0, :, :, slice_idx], cmap="gray")
+        plt.title("Augmented Image")
+        plt.axis("off")
 
         # Add overall title with augmentation parameters
         # plt.suptitle(
@@ -248,11 +266,8 @@ def plot_augmentation(img, tumor_mask_bool, brain_mask_bool, augmented_img,brain
 
         # Save only, don't show
         plt.tight_layout()
-        plt.savefig('spatial_contrast_aug.png', bbox_inches='tight', dpi=300)
+        plt.savefig("spatial_contrast_aug.png", bbox_inches="tight", dpi=300)
         plt.close()
-
-
-
 
 
 def MixUp(x:torch.tensor, working_image:torch.tensor,channel_add:int,mask:torch.tensor,lam_params:tuple = (0.7, 1)):
@@ -273,8 +288,48 @@ def MixUp(x:torch.tensor, working_image:torch.tensor,channel_add:int,mask:torch.
 
 
 
+def lesion_blur(
+    tumor_mask_bool: bool,
+    brain_mask_bool: bool,
+    working_img: torch.tensor,
+    blur_sigma_range: tuple = (0.5, 0.5),
+    dilation_iterations: int = 1,
+    img: torch.tensor = None,
+):
+    """
+    Apply lesion blur augmentation to the input tensor img.
+    """
 
+    tumor_mask_np = tumor_mask_bool[0].cpu().numpy()
+    brain_mask_np = brain_mask_bool[0].cpu().numpy()
 
-  
+    dilated_tumor = ndimage.binary_dilation(
+        tumor_mask_np, iterations=dilation_iterations, border_value=0
+    )
 
+    eroded_tumor_np = ndimage.binary_erosion(
+        tumor_mask_np, iterations=dilation_iterations, border_value=0
+    )
 
+    outer_boundary_component_np = dilated_tumor & ~tumor_mask_np
+    inner_boundary_component_np = tumor_mask_np & ~eroded_tumor_np
+
+    boundary_np = (
+        outer_boundary_component_np | inner_boundary_component_np
+    ) & brain_mask_np
+
+    if np.any(boundary_np):
+        boundary_tensor = torch.from_numpy(boundary_np).to(device=img.device)
+        sigma = np.random.uniform(*blur_sigma_range)
+
+        for c in range(working_img.shape[0]):
+            channel_data_np = working_img[c].cpu().numpy()
+            blurred_channel_np = ndimage.gaussian_filter(channel_data_np, sigma=sigma)
+            blurred_channel_tensor = torch.from_numpy(blurred_channel_np).to(
+                device=img.device
+            )
+
+            working_img[c] = torch.where(
+                boundary_tensor, blurred_channel_tensor, working_img[c]
+            )
+    return working_img

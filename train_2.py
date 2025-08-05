@@ -20,15 +20,10 @@ from tqdm import tqdm
 
 
 
-
 def main(train_config,aug_config,database_config,k_fold,args,channels_copy):
 
 
     torch.multiprocessing.set_sharing_strategy("file_system")
-
-
-    print(f"prob_tumor_scale_shift: {aug_config.prob_tumor_scale_shift}")
-    print(f"prob_brain_scale_shift: {aug_config.prob_brain_scale_shift}")    
 
     # load config
 
@@ -136,10 +131,9 @@ def main(train_config,aug_config,database_config,k_fold,args,channels_copy):
     train_loaders,val_loader,data_loader_map = get_dataloader(train_config, database_config,datasetlist, cropped_input_size , data_size,channels_copy,k_fold,dataset_use = "Train")
     # print('load WMH only for validation:')
 
-    # Load data for validation only. Temporarily modify train_config to not drop FLAIR for WMH loading
-    validate_data_only = True
+    
 
-    if validate_data_only:
+    if held_out_datasets:  # This checks if the list is not empty
         # Temporarily store the original value
         original_modality_remove = train_config.modality_remove
         # Set to None for validation data loading
@@ -564,185 +558,6 @@ def main(train_config,aug_config,database_config,k_fold,args,channels_copy):
                 IOU_metric.reset()
                 total_av_dice = list()
 
-                ################ I want to test WMH as I go along to see how it does #######################
-                
-                # Test with all modalities
-        
-                # if domain_invariant_slot:
-                    
-                #     for dataset in ["ATLAS","TUMOUR2"]:
-                        
-                #         for val_data in val_only_loader[dataset]:
-
-                #             channels[dataset] = channels_copy[dataset]
-
-                #             channels[dataset] = [x if x != 'T1' else 'invar' for x in channels[dataset]]
-                            
-                #             channel_map[dataset] = utils.map_channels(
-                #                 channels[dataset],
-                #                 total_modalities,
-                #                 rand_assign=rand_assign_channels,
-                #             )
-
-                #             if single_slot:
-                #                 input_data, _ = utils.single_slot(val_data[0])
-                #             else:
-                #                 input_data = torch.from_numpy(
-                #                     np.zeros(
-                #                         (
-                #                             1,
-                #                             len(total_modalities),
-                #                             val_data[0].shape[2],
-                #                             val_data[0].shape[3],
-                #                             val_data[0].shape[4],
-                #                         ),
-                #                         dtype=np.float32,
-                #                     )
-                #                 )
-                #                 if domain_invariant_slot:
-                #                     input_data[:, channel_map[dataset], :, :, :] = val_data[0]
-                #                 else:
-                #                     input_data[:, channel_map[dataset], :, :, :] = val_data[0]
-
-                #             input_data = input_data.to(device)
-                #             label = val_data[1].to(device)
-                #             roi_size = (
-                #                 cropped_input_size[0],
-                #                 cropped_input_size[1],
-                #                 cropped_input_size[2],
-                #             )
-                #             sw_batch_size = 1
-
-                #             val_outputs = sliding_window_inference(
-                #             input_data, roi_size, sw_batch_size,model
-                #             )
-                #             val_outputs = [
-                #                 post_trans(i) for i in decollate_batch(val_outputs)
-                #             ]
-                #             dice_metric(y_pred=val_outputs, y=label)
-                #             sensitivity_metric(y_pred=val_outputs, y=label)
-                #             precision_metric(y_pred=val_outputs, y=label)
-                #             IOU_metric(y_pred=val_outputs, y=label)
-                #         metric[dataset] = {
-                #             "dice": dice_metric.aggregate().item(),
-                #             "sensitivity": sensitivity_metric.aggregate()[0].item(),
-                #             "precision": precision_metric.aggregate()[0].item(),
-                #             "IOU": IOU_metric.aggregate().item(),
-                #         }
-                    
-                    
-                #         dice_metric.reset()
-                    
-                #         sensitivity_metric.reset()
-                #         precision_metric.reset()
-                #         IOU_metric.reset()
-                #         if metric[dataset]["dice"] > best_metric.get(dataset, -1):
-                #             best_metric[dataset] = metric[dataset]["dice"]
-                #             best_metric_epoch[dataset] = epoch + 1
-                #         print("current epoch: {} current mean dice {}: {:.4f} best mean dice {}: {:.4f} at epoch {}".format(
-                #                 epoch + 1,
-                #                 dataset,
-                #                 metric[dataset]["dice"],
-                #                 dataset,
-                #                 best_metric[dataset],
-                #                 best_metric_epoch[dataset],
-                #             )
-                #         )
-        
-
-                    
-                
-
-                #         total_av_dice.append(metric[dataset]["dice"])
-
-                
-                    
-                    ##### Test with only the invariant channel   #####
-                    # dice_metric_invar = DiceMetric(include_background=True, reduction="mean")
-                    # sensitivity_metric_invar = ConfusionMatrixMetric(metric_name="sensitivity", include_background=True)
-                    # precision_metric_invar = ConfusionMatrixMetric(metric_name="precision", include_background=True)
-                    # IOU_metric_invar = MeanIoU(include_background=True)
-                
-                    
-                    # for val_data in val_only_loader["WMH"]:
-                    #     # Create input with only the invariant channel
-                    #     input_data_invar = torch.from_numpy(
-                    #         np.zeros(
-                    #             (
-                    #                 1,
-                    #                 len(total_modalities),
-                    #                 val_data[0].shape[2],
-                    #                 val_data[0].shape[3],
-                    #                 val_data[0].shape[4],
-                    #             ),
-                    #             dtype=np.float32,
-                    #         )
-                    #     )
-                        
-                    #     # Find the invariant channel index
-                    #     invar_channel_idx = None
-                    #     for i, modality in enumerate(channels['WMH']):
-                    #         if modality == 'invar':
-                    #             invar_channel_idx = channel_map['WMH'][i]
-                    #             invar_id = invar_channel_idx
-                    #             break
-                            
-                        
-                    #     if invar_id is not None:
-                    #         # Copy only the invariant channel
-                    #         input_data_invar[:, invar_id, :, :, :] = val_data[0][:, i, :, :, :]
-                    #     else:
-                    #         print("Warning: No invariant channel found in WMH data")
-                        
-                    #     input_data_invar = input_data_invar.to(device)
-                    #     label = val_data[1].to(device)
-                    #     roi_size = (
-                    #         cropped_input_size[0],
-                    #         cropped_input_size[1],
-                    #         cropped_input_size[2],
-                    #     )
-                    #     sw_batch_size = 1
-
-                    
-                        
-                    #     val_outputs_invar = sliding_window_inference(
-                    #         input_data_invar, roi_size, sw_batch_size,model
-                    #     )
-                    #     val_outputs_invar = [
-                    #         post_trans(i) for i in decollate_batch(val_outputs_invar)
-                    #     ]
-                    #     dice_metric_invar(y_pred=val_outputs_invar, y=label)
-                    #     sensitivity_metric_invar(y_pred=val_outputs_invar, y=label)
-                    #     precision_metric_invar(y_pred=val_outputs_invar, y=label)
-                    #     IOU_metric_invar(y_pred=val_outputs_invar, y=label)
-                    
-                    # metric["WMH_invar"] = {
-                    #     "dice": dice_metric_invar.aggregate().item(),
-                    #     "sensitivity": sensitivity_metric_invar.aggregate()[0].item(),
-                    #     "precision": precision_metric_invar.aggregate()[0].item(),
-                    #     "IOU": IOU_metric_invar.aggregate().item(),
-                    # }
-                    
-                    # print(
-                    #     "current epoch: {} current mean dice WMH (invar only): {:.4f}".format(
-                    #         epoch + 1,
-                    #         metric["WMH_invar"]["dice"],
-                    #     )
-                    # )
-                    
-                    # if wandb_active:
-                    #     wandb.log(
-                    #         {
-                    #             "epoch_val": epoch + 1,
-                    #             "mdice_ATLAS": metric["ATLAS"]["dice"],          # was WMH before
-                    #             #"mdice_WMH_invar": metric["WMH_invar"]["dice"],
-                    #             "mdice_TUMOUR2": metric["TUMOUR2"]["dice"], }
-                    #     )
-
-
-                #########################################
-             
-            
                 
                 for dataset in [*datasetlist, *held_out_datasets]:
                     metric[dataset] = {}
@@ -901,8 +716,7 @@ def main(train_config,aug_config,database_config,k_fold,args,channels_copy):
     #     wandb.log({"Best_Checkpint_Path":model_save_best_name})
 
    
-
-            
+   
 if __name__ == "__main__":
 
 
@@ -917,81 +731,16 @@ if __name__ == "__main__":
     )
 
  
-
-    parser.add_argument(
-        "--augmentation", help="augmentation", type=str, default=None
-    )
-
-
-    # Augmentation parameters
-    parser.add_argument("--prob_brain_invert", type=float, default=None)
-    parser.add_argument("--prob_brain_mixup", type=float, default=None)
-    parser.add_argument("--prob_pathology_switch", type=float, default=None)
-    parser.add_argument("--prob_pathology_invert", type=float, default=None)
-    parser.add_argument("--prob_pathology_mixup", type=float, default=None)
-    parser.add_argument("--prob_tumor_scale_shift", type=bool, default=False)
-    parser.add_argument("--prob_brain_scale_shift", type=bool, default=False)
-    parser.add_argument("--uniform_augs", type=bool, default=False)
-    parser.add_argument("--uniform_scale_shift", type=int, default=None)
-    parser.add_argument("--uniform_mix_up", type=float, default=None)
-    parser.add_argument("--uniform_invert", type=float, default=None)
-
-
-
     #########################
     args = parser.parse_args()
-    args.device_id = 1
-    args.datasets =  'MSSEG'   #'ISLES2022'
-    
-    
-
-  
+    args.device_id = 0
+    args.datasets =  "ISLES2022_MSSEG_BRATS_TBI_ATLAS"
     ######################################
 
     train_config = config.Training_config()
     database_config = config.Database_config()
     channels_copy = copy.deepcopy(database_config.channels)
     aug_config = config.Augmentation_config()
-
-
-     # Override augmentation config with command line arguments
-    if args.prob_brain_invert is not None:
-        aug_config.prob_brain_invert = args.prob_brain_invert
-        print(f"prob_brain_invert: {args.prob_brain_invert}")
-    if args.prob_brain_mixup is not None:
-        aug_config.prob_brain_mixup = args.prob_brain_mixup
-        print(f"prob_brain_mixup: {args.prob_brain_mixup}")
-    if args.prob_pathology_switch is not None:
-        aug_config.prob_pathology_switch = args.prob_pathology_switch
-        print(f"prob_pathology_switch: {args.prob_pathology_switch}")
-    if args.prob_pathology_invert is not None:
-        aug_config.prob_pathology_invert = args.prob_pathology_invert
-        print(f"prob_pathology_invert: {args.prob_pathology_invert}")
-    if args.prob_pathology_mixup is not None:
-        aug_config.prob_pathology_mixup = args.prob_pathology_mixup
-        print(f"prob_pathology_mixup: {args.prob_pathology_mixup}")
-    if args.prob_tumor_scale_shift is not False:
-        aug_config.prob_tumor_scale_shift = args.prob_tumor_scale_shift
-        print(f"prob_tumor_scale_shift: {args.prob_tumor_scale_shift}")
-    if args.prob_brain_scale_shift is not False:
-        aug_config.prob_brain_scale_shift = args.prob_brain_scale_shift
-        print(f"prob_brain_scale_shift: {args.prob_brain_scale_shift}")
-    if args.uniform_augs is not False:
-        aug_config.uniform_augs = args.uniform_augs
-        print(f"uniform_augs: {args.uniform_augs}")
-    if args.uniform_scale_shift is not None:
-        aug_config.uniform_scale_shift = args.uniform_scale_shift
-        print(f"uniform_scale_shift: {args.uniform_scale_shift}")
-    if args.uniform_mix_up is not None:
-        aug_config.uniform_mix_up = args.uniform_mix_up
-        print(f"uniform_mix_up: {args.uniform_mix_up}")
-    if args.uniform_invert is not None:
-        aug_config.uniform_invert = args.uniform_invert
-        print(f"uniform_invert: {args.uniform_invert}")
-
-    #########
-
-    print(aug_config)
 
    
     main(train_config,aug_config,database_config,k_fold=None,args = args,channels_copy = channels_copy)

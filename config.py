@@ -26,23 +26,22 @@ class Training_config():
     load_pre_trained_model:bool = False  # if true will load pre-train model  
     load_model_path:Path =  'models/WMH_PRELIM_TEST/_model_remove:_FLAIR/TBI_ISLES2022_BRATS_MSSEG_ATLAS/2025-06-30_12-04/WMH_PRELIM_TEST_random_drop_True_2025-06-30_12-04_Epoch_49.pth'
     ## Remove modality from the training set (can use for testing the agnostic channel)
-    modality_remove =None # Can be: str, list, or None. Single modality (str) or multiple modalities (list) to remove. None if no modality to be dropped 
+    modality_remove ='FLAIR' # Can be: str, list, or None. Single modality (str) or multiple modalities (list) to remove. None if no modality to be dropped 
     random_drop:int = 1 # 1 for to be dropped and 0 for not to be dropped. 
     #### admin  ####
     wandb_active:bool = True
     project_name:str = "Agnostic_channel"   # wandb project name
     model_save_path:str = "models/" + project_name + "/_model_remove:_" + str(modality_remove) + "/" # path to save the model
     ### Layers in model specific to domain invariant slot ###
-    domain_invariant_layers:bool = False
+    domain_invariant_layers:bool = True
     domain_invariant_slot:bool = True
-    contrast_augmentation: bool = False
-    ##### baselines #####
+    contrast_augmentation: bool = True
+    ##### Baselines #####
     rand_assign_channels:bool = False
     single_slot:bool = False  
     
     ### HELD OUT DATASET WANT TO VALIDATE AS TRAIN WITH OR WITHOUT UNSEEN MODALITY ####
-    held_out_datasets:list = ["WMH"]
-   
+    held_out_datasets:list = ['WMH']  # datasets want to use for validation but not for training
 
 
 class Database_config():
@@ -76,7 +75,7 @@ class Database_config():
     train_size["VOETS2"] = 3
     train_size["ISLES2022"] = 175 #175    #50
     train_size["TUMOUR2"] = 1 
-    train_size["VESTIBS"] = 0
+    train_size["VESTIBS"] = 176
     total_size = {}
     total_size["BRATS"] = 484
     total_size["ATLAS"] = 654
@@ -133,7 +132,7 @@ class Database_config():
     val_size["ISLES2022"] = 75
     val_size["ISLES"] = 28   #28  #9
     val_size["TUMOUR2"] = 57  #10
-    val_size["VESTIBS"] = 242
+    val_size["VESTIBS"] = 66
 
     mask_path = {}
     mask_path["BRATS"] = "data/BRATS/Masks"
@@ -202,28 +201,28 @@ class Finetune_config:
 
 class Augmentation_config:
     ##### Brain Tissue Augmentations #####
-    prob_brain_invert: float = 0.5 
-    prob_brain_mixup: float = 0.5
-    prob_brain_scale_shift: bool = True
+    prob_brain_invert: float = 0 #0.5 
+    prob_brain_mixup: float = 0 #0.5
+    prob_brain_scale_shift: bool = False
 
     brain_factor_multiply: tuple = (0.8, 1.2)
     brain_factor_intensity: tuple = (-0.2, 0.2)
 
     ##### Pathology Tissue Augmentations #####
-    prob_pathology_switch: float = 0.75 
-    prob_pathology_invert: float = 0.5  
-    prob_pathology_mixup: float = 0.5 
-    prob_tumor_scale_shift: bool = True
+    prob_pathology_switch: float = 0 #0.75 
+    prob_pathology_invert: float = 0 #0.5  
+    prob_pathology_mixup: float = 0 #0.5 
+    prob_tumor_scale_shift: bool = False
 
     tumor_factor_multiply: tuple = (0.8, 1.2)
     tumor_factor_intensity: tuple = (-0.2, 0.2)
 
     ##### Uniform Augmentations #####
     # uniform augmentations apply same probability to both pathology and the healthy brain tissue,
-    uniform_augs: bool = False
-    uniform_scale_shift: bool = False
-    uniform_mix_up: float = 0
-    uniform_invert: float = 0
+    uniform_augs: bool = True
+    uniform_scale_shift: bool = True
+    uniform_mix_up: float = 0.5
+    uniform_invert: float = 0.5
 
 
 
