@@ -7,8 +7,8 @@ from monai.inferers import sliding_window_inference
 from monai.metrics import DiceMetric,ConfusionMatrixMetric,MeanIoU
 from monai.transforms import Activations, AsDiscrete, Compose
 from monai.losses.dice import DiceCELoss
-from nets.unet import res_unet as unet_old
-from nets.unet_deep import res_unet as unet_deep
+from nets.multi_unet import res_unet as unet_old
+from nets.agnostic_unet import res_unet as agnostic_net
 import numpy as np
 import utils
 from dataloader import get_dataloader
@@ -183,7 +183,7 @@ def main(args,k_fold: None):
             )
         
 
-        model = unet_deep(in_channels=in_channel,invariant_channel=invariant_channel).to(device)
+        model = agnostic_net(in_channels=in_channel,invariant_channel=invariant_channel).to(device)
         optimizer = torch.optim.Adam(model.parameters(), lr=train_config.lr)
         
         

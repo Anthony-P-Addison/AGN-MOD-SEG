@@ -1,0 +1,21 @@
+
+#### Shuffle the channels ####
+#checkpoint1 = ['models/WMH_PRELIM_TEST/_model_remove:_None/TBI_WMH_BRATS_MSSEG_ATLAS/2025-06-13_19-14/WMH_PRELIM_TEST_random_drop_True_2025-06-13_19-14_Epoch_599.pth']
+
+#### STANDARD MODEL ####
+
+#checkpoint1 = ['models/BASELINE/_model_remove:_None/TBI_WMH_BRATS_MSSEG_ATLAS/2025-06-12_15-01/WMH_PRELIM_TEST_random_drop_True_2025-06-12_15-01_Epoch_599.pth']
+
+
+
+
+### INVARIANAT CHANNEL  AND INVARIANT LAYER ###
+
+#checkpoint1 = ['models/WMH_PRELIM_TEST/_model_remove:_None/TBI_WMH_BRATS_MSSEG_ATLAS/2025-06-16_23-33/WMH_PRELIM_TEST_random_drop_True_2025-06-16_23-33_Epoch_599.pth']
+
+#######  SINGLE CHANNEL MODEL ######
+#checkpoint1 = ['models/WMH_PRELIM_TEST/_model_remove:_FLAIR/TBI_ISLES2022_BRATS_MSSEG_ATLAS/2025-06-20_15-14/WMH_PRELIM_TEST_random_drop_False_2025-06-20_15-14_Epoch_599.pth']
+
+### Invariant channel ####
+# checkpoint1 =  ['models/from_arc/2025-06-22_14-49/ARC_STUFF_random_drop_True_2025-06-22_14-49_Epoch_549.pth']
+checkpoint1 = ['models/from_arc/_model_remove:_None/TBI_WMH_BRATS_MSSEG_ATLAS/2025-06-22_15-46/ARC_STUFF_random_drop_True_2025-06-22_15-46_Epoch_549.pth']

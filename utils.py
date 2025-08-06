@@ -2,14 +2,14 @@ import random
 import numpy as np
 import math 
 import torch
-from nets.unet import res_unet as Unet
+from nets.multi_unet import res_unet as Unet
 from itertools import combinations
 import nibabel as nib
 from monai.transforms import  Compose,EnsureChannelFirst
 from monai.data import ImageDataset, DataLoader
 from augment_utils import spatial_contrast_aug
-from nets.residual_block_identity import ResidualUnit_changed as ResidualUnit
-from nets.unet_deep import Convolution
+from nets.agnostic_residual_block_identity import ResidualUnit_changed as ResidualUnit
+from nets.agnostic_unet import Convolution
 import torch.nn as nn
 
 def rand_assign_channels(dataset_modalities: list[int], total_modalities: list[str])-> list[int]:
@@ -444,70 +444,108 @@ def lr_schedule(epochs, optimizer):
     return scheduler
 
 
-### TESTING HELD OUT DATASTES WITH HELD OUT MODALITEIS AS YOU TRAIN TO OBSERVE LEARNING PROGREESS OF AGNOSTIC CHANNEL #####
+
+
+###### Test definitions #######
+
+
+
+def ensemble_across_modalities(prediction_dict, threshold=0.5):
+    """
+    Ensembles predictions across modalities for each sample index.
+
+    Args:
+        prediction_dict (dict): keys are modalities, values are lists of predictions (length N).
+        threshold (float): threshold for binarization.
+
+    Returns:
+        list: ensembled predictions for each sample index.
+    """
+    num_samples = len(next(iter(prediction_dict.values())))
+    modalities = list(prediction_dict.keys())
+    ensembled_predictions = []
+
+    for idx in range(num_samples):
+        # Collect predictions for this sample from all modalities
+        preds = [prediction_dict[mod][idx] for mod in modalities]
+        # Stack: shape [num_modalities, ...]
+        stacked = torch.stack(preds, dim=0)
+        # Apply sigmoid to convert logits to probabilities [0, 1]
+        probabilities = torch.sigmoid(stacked)
+        # Average probabilities across modalities
+        mean_prob = torch.mean(probabilities, dim=0)
+        # Final threshold to get binary prediction
+        final_pred = (mean_prob > threshold).float()
+        ensembled_predictions.append(final_pred)
+        
+        # Clear intermediate tensors
+        del preds, stacked, probabilities, mean_prob, final_pred
+    
+    return ensembled_predictions
+
+
+def calculate_dice_scores(predictions, labels, device):
+    """
+    Calculates Dice scores for each patient.
+    """
+    from monai.metrics import DiceMetric
+    
+    # Create DiceMetric once outside the loop for efficiency
+    dice_metric = DiceMetric(include_background=True, reduction="mean", get_not_nans=False)
+    dice_scores = []
+    
+    # Loop through each prediction and label pair
+    for i, (pred, label) in enumerate(zip(predictions, labels)):
+        # Move to GPU for calculation
+        pred = pred.to(device, dtype=torch.float32)
+        label = label.to(device, dtype=torch.float32)
+        
+        # Calculate Dice for this sample
+        dice_score = dice_metric(pred.unsqueeze(0), label.unsqueeze(0))
+        dice_scores.append(dice_score.item())
+        
+        # Reset metric for next calculation
+        dice_metric.reset()
+        
+        # Clear from GPU
+        del pred, label
+        
+    return np.array(dice_scores)
+        
+
+
+def load_test_checkpoints(model_name:str,checkpoint_own:str):
+    """load checkpoints eother  models trained by author or own checkpoints"""
+    import json 
+
+    if model_name is not 'own_checkpoint':
+        with open('checkpoint_paths.json', 'r') as f:
+            checkpoint_paths = json.load(f)
+        
+        if model_name in checkpoint_paths:
+            checkpoint = checkpoint_paths[model_name]['path']
+            print(f"Testing {model_name}: {checkpoint_paths[model_name]['description']}")
+
+        else:
+            print(f"Model '{model_name}' not found in checkpoint_paths.json")
+            print("Available models:")
+            for name in checkpoint_paths.keys():
+                print(f"- {name}")
+
+    ## load own checkpoint ##
+    elif model_name =='own_checkpoint':
+        checkpoint = checkpoint_own
+        if checkpoint is None:
+            raise ValueError("No checkpoint path provided. Please provide a valid path to a model checkpoint file when using 'own_checkpoint' mode.")
+    return checkpoint
+
 
 
 
 
 
 if __name__ == "__main__":
-    #test functions here 
-
-    # single slot test 
-    
-    single_slot(torch.rand((2, 4, 128, 128, 128)))
-
-
-    #TODO: make a funciton for analysing modalities used during training. 
-        
-    ##### --- Track modalities used for training (not dropped) ---##########
-
-    # # Initialize counters if they don't exist
-    # if not hasattr(rand_set_channels_to_zero_with_invar, 'modality_used_counter'):
-    #     rand_set_channels_to_zero_with_invar.modality_used_counter = {}
-    #     rand_set_channels_to_zero_with_invar.total_iterations = 0
-
-    # if not hasattr(rand_set_channels_to_zero_with_invar, 'combination_used_counter'):
-    #     rand_set_channels_to_zero_with_invar.combination_used_counter = {}
-
-    # # Increment total iterations
-    # rand_set_channels_to_zero_with_invar.total_iterations += 1
-
-    # # Count used modalities and combinations
-    # for i, modalities in enumerate(modalities_remain):
-    #     # Individual modality usage
-    #     for mod_idx in modalities:
-    #         mod_name = dataset_modalities[mod_idx]
-    #         if mod_name not in rand_set_channels_to_zero_with_invar.modality_used_counter:
-    #             rand_set_channels_to_zero_with_invar.modality_used_counter[mod_name] = 0
-    #         rand_set_channels_to_zero_with_invar.modality_used_counter[mod_name] += 1
-
-    #     # Combination usage
-    #     used_mods = [dataset_modalities[j] for j in sorted(modalities)]
-    #     combo_str = '+'.join(used_mods) if used_mods else 'None'
-    #     if combo_str not in rand_set_channels_to_zero_with_invar.combination_used_counter:
-    #         rand_set_channels_to_zero_with_invar.combination_used_counter[combo_str] = 0
-    #     rand_set_channels_to_zero_with_invar.combination_used_counter[combo_str] += 1
-
-    # # Print statistics every 10 iterations
-    # if rand_set_channels_to_zero_with_invar.total_iterations % 30 == 0:
-    #     total_samples = rand_set_channels_to_zero_with_invar.total_iterations * batch_img_data.shape[0]
-
-    #     print(f"\n--- Modality Used Statistics (after {rand_set_channels_to_zero_with_invar.total_iterations} iterations) ---")
-    #     for mod_name, count in rand_set_channels_to_zero_with_invar.modality_used_counter.items():
-    #         use_percentage = (count / total_samples) * 100
-    #         print(f"  {mod_name}: used {count} times ({use_percentage:.2f}%)")
-    #     print("---------------------------------------------------\n")
-
-    #     print(f"--- Used Modality Combinations (after {rand_set_channels_to_zero_with_invar.total_iterations} iterations) ---")
-    #     print(f"{'Combination':<30} | {'Count':<10}")
-    #     print("-" * 45)
-    #     for combo, count in sorted(rand_set_channels_to_zero_with_invar.combination_used_counter.items(), key=lambda x: -x[1]):
-    #         print(f"{combo:<30} | {count:<10}")
-    #     print("---------------------------------------------------\n")
-
-    #############################################################################
-
+    breakpoint()
 
 
 

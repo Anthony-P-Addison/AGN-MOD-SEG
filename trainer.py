@@ -11,8 +11,8 @@ import datetime
 from dataloader import get_dataloader
 import copy
 from tqdm import tqdm
-from nets.unet import res_unet as unet_old
-from nets.unet_deep import res_unet as unet_deep
+from nets.multi_unet import res_unet as unet_old
+from nets.agnostic_unet import res_unet as unet_deep
 import os
 
 class Trainer:

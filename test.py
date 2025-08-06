@@ -5,8 +5,8 @@ from monai.data import decollate_batch
 from monai.inferers import sliding_window_inference
 from monai.metrics import DiceMetric, ConfusionMatrixMetric, MeanIoU
 from monai.transforms import Activations, AsDiscrete, Compose
-from nets.unet import res_unet as Unet   
-from nets.unet_deep import res_unet as Unet_deep
+from nets.multi_unet import res_unet as Unet   
+from nets.agnostic_unet import res_unet as Unet_deep
 import numpy as np
 import utils
 import config
@@ -14,6 +14,7 @@ import argparse
 import tabulate
 from dataloader import create_test_val_loader, get_modalities_drop
 import copy 
+import json 
 
 
 
@@ -273,6 +274,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--trained_on", help="The datasets the model was trained on", type=str
     )
+    parser.add_argument(
+        "--checkpoint", help="The checkpoint to test", type=str, default=None
+    )
+    parser.add_argument(
+        "--model_name", help="The name of the model to test", type=str, default=None
+    )
 
     args = parser.parse_args()
 
@@ -280,84 +287,28 @@ if __name__ == "__main__":
 
     args.datasets_to_test = 'ISLES2022'
     args.modalities_to_test = "0_1" #ic order of modalities
-    args.test_all_combinations = 1
-    args.device_id = 0
+    args.test_all_combinations = 0
+    args.device_id = 1
     args.trained_on = "BRATS_MSSEG_ATLAS_WMH_TBI" #DATASETS the model was trained on
-    #########################
-
-
-    #### Shuffle the channels ####
-    #checkpoint1 = ['models/WMH_PRELIM_TEST/_model_remove:_None/TBI_WMH_BRATS_MSSEG_ATLAS/2025-06-13_19-14/WMH_PRELIM_TEST_random_drop_True_2025-06-13_19-14_Epoch_599.pth']
-
-    #### STANDARD MODEL ####
-
-    #checkpoint1 = ['models/BASELINE/_model_remove:_None/TBI_WMH_BRATS_MSSEG_ATLAS/2025-06-12_15-01/WMH_PRELIM_TEST_random_drop_True_2025-06-12_15-01_Epoch_599.pth']
-
-
-
-
-    ### INVARIANAT CHANNEL  AND INVARIANT LAYER ###
+    args.checkpoint = None 
+    args.model_name = 'single_channel'
     
-    #checkpoint1 = ['models/WMH_PRELIM_TEST/_model_remove:_None/TBI_WMH_BRATS_MSSEG_ATLAS/2025-06-16_23-33/WMH_PRELIM_TEST_random_drop_True_2025-06-16_23-33_Epoch_599.pth']
+    ######################################################
+    
+    checkpoint = utils.load_test_checkpoints(args.model_name,args.checkpoint)
+    
 
-    #######  SINGLE CHANNEL MODEL ######
-    #checkpoint1 = ['models/WMH_PRELIM_TEST/_model_remove:_FLAIR/TBI_ISLES2022_BRATS_MSSEG_ATLAS/2025-06-20_15-14/WMH_PRELIM_TEST_random_drop_False_2025-06-20_15-14_Epoch_599.pth']
 
-    ### Invariant channel ####
-    # checkpoint1 =  ['models/from_arc/2025-06-22_14-49/ARC_STUFF_random_drop_True_2025-06-22_14-49_Epoch_549.pth']
-    checkpoint1 = ['models/from_arc/_model_remove:_None/TBI_WMH_BRATS_MSSEG_ATLAS/2025-06-22_15-46/ARC_STUFF_random_drop_True_2025-06-22_15-46_Epoch_549.pth']
-
-   
-   
-    single_slot_model = False
+    single_slot_model = True
     if not single_slot_model: 
-        for file in checkpoint1:
-            tester = ModelTester(args,file)
-            x=tester.run()
-            x,y = tester.return_dictionary_and_label()
+        tester = ModelTester(args,checkpoint)
+        x=tester.run()
+        x,y = tester.return_dictionary_and_label()
             
-
-
-
-
-  
     # ensembling predictions for single slot model 
 
     elif single_slot_model:
-
-        def ensemble_across_modalities(prediction_dict, threshold=0.5):
-            """
-            Ensembles predictions across modalities for each sample index.
-
-            Args:
-                prediction_dict (dict): keys are modalities, values are lists of predictions (length N).
-                threshold (float): threshold for binarization.
-
-            Returns:
-                list: ensembled predictions for each sample index.
-            """
-            num_samples = len(next(iter(prediction_dict.values())))
-            modalities = list(prediction_dict.keys())
-            ensembled_predictions = []
-
-            for idx in range(num_samples):
-                # Collect predictions for this sample from all modalities
-                preds = [prediction_dict[mod][idx] for mod in modalities]
-                # Stack: shape [num_modalities, ...]
-                stacked = torch.stack(preds, dim=0)
-                # Apply sigmoid to convert logits to probabilities [0, 1]
-                probabilities = torch.sigmoid(stacked)
-                # Average probabilities across modalities
-                mean_prob = torch.mean(probabilities, dim=0)
-                # Final threshold to get binary prediction
-                final_pred = (mean_prob > threshold).float()
-                ensembled_predictions.append(final_pred)
-                
-                # Clear intermediate tensors
-                del preds, stacked, probabilities, mean_prob, final_pred
-            
-            return ensembled_predictions
-
+        print("Ensembling predictions for single slot model")
 
         all_predictions = {}
         all_labels = None  # Only store labels once
@@ -370,30 +321,30 @@ if __name__ == "__main__":
             args.modalities_to_test = str(i)
             args.test_all_combinations = 0
             
-            for file in checkpoint1:
-                tester = ModelTester(args, file)
-                tester.run()
-                x, y = tester.return_dictionary_and_label()
-                
-                # Initialize the list if this is the first time for this modality
-                key = f'[{i}]'
-                if key not in all_predictions:
-                    all_predictions[key] = []
-                
-                # Move predictions to CPU and store
-                cpu_predictions = [pred.cpu() for pred in list(x.values())[0]]
-                all_predictions[key].extend(cpu_predictions)
-                
-                # Only store labels once (they're the same for all modalities)
-                if all_labels is None:
-                    all_labels = [label.cpu() for label in y]
-                
-                # Clear GPU memory
-                del tester, x, y, cpu_predictions
-                torch.cuda.empty_cache()
-                
-                print(f"GPU memory after modality {i}: {torch.cuda.memory_allocated()/1e9:.2f} GB")
         
+            tester = ModelTester(args, checkpoint)
+            tester.run()
+            x, y = tester.return_dictionary_and_label()
+            
+            # Initialize the list if this is the first time for this modality
+            key = f'[{i}]'
+            if key not in all_predictions:
+                all_predictions[key] = []
+            
+            # Move predictions to CPU and store
+            cpu_predictions = [pred.cpu() for pred in list(x.values())[0]]
+            all_predictions[key].extend(cpu_predictions)
+            
+            # Only store labels once (they're the same for all modalities)
+            if all_labels is None:
+                all_labels = [label.cpu() for label in y]
+            
+            # Clear GPU memory
+            del tester, x, y, cpu_predictions
+            torch.cuda.empty_cache()
+            
+            print(f"GPU memory after modality {i}: {torch.cuda.memory_allocated()/1e9:.2f} GB")
+    
         print("\nEnsembling predictions...")
         
         # Move predictions back to GPU for ensembling (one at a time)
@@ -403,39 +354,11 @@ if __name__ == "__main__":
         for key in all_predictions:
             all_predictions[key] = [pred.to(device) for pred in all_predictions[key]]
         
-        final_predictions = ensemble_across_modalities(all_predictions)
+        final_predictions = utils.ensemble_across_modalities(all_predictions)
         
-        # Calculate Dice scores for ensembled predictions
-        def calculate_dice_scores(predictions, labels):
-            """
-            Calculates Dice scores for each patient.
-            """
-            from monai.metrics import DiceMetric
-            
-            # Create DiceMetric once outside the loop for efficiency
-            dice_metric = DiceMetric(include_background=True, reduction="mean", get_not_nans=False)
-            dice_scores = []
-            
-            # Loop through each prediction and label pair
-            for i, (pred, label) in enumerate(zip(predictions, labels)):
-                # Move to GPU for calculation
-                pred = pred.to(device, dtype=torch.float32)
-                label = label.to(device, dtype=torch.float32)
-                
-                # Calculate Dice for this sample
-                dice_score = dice_metric(pred.unsqueeze(0), label.unsqueeze(0))
-                dice_scores.append(dice_score.item())
-                
-                # Reset metric for next calculation
-                dice_metric.reset()
-                
-                # Clear from GPU
-                del pred, label
-                
-            return np.array(dice_scores)
         
         # Calculate Dice scores
-        dice_scores = calculate_dice_scores(final_predictions, all_labels)
+        dice_scores = utils.calculate_dice_scores(final_predictions, all_labels,device)
         
         print(f"\n=== Ensemble Results ===")
         for i, score in enumerate(dice_scores):

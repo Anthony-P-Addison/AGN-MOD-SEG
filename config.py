@@ -12,7 +12,7 @@ class Training_config():
     workers:int = 2 #numworker
     train_batch_size: int = 2 
     val_interval:int = 4 #number of epochs between the validation         
-    model_type:str = "deep_unet"   # deep_unet, old_unet
+    model_type:str = "AGNOSTIC_NET"   # AGNOSTIC_NET, MULTIUNET
     cropped_input_size:tuple = (96,96,96)
     # lr_config
     lr:float =  1e-4  # initial lr
@@ -156,8 +156,8 @@ class Test_config():
     
     # Slot 
     rand_assign:bool = False # True to randomly assign the channels to the model
-    domain_invariant_slot:bool =  True
-    single_slot:bool = False
+    domain_invariant_slot:bool =  False
+    single_slot:bool = True
     modality_remove = 'DWI' #Can be: str, list, or None. Modalities to be completely removed during test in dataloader. 
     invariant_layers:bool = False
     modality_rem_train: str = 'ADC' # the modality that was removed during training and now want to test in the invariant slot.

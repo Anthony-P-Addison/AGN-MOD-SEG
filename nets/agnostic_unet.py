@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from nets.residual_block_identity import ResidualUnit_changed as ResidualUnit
+from nets.agnostic_residual_block_identity import ResidualUnit_changed as ResidualUnit
 from monai.networks.blocks import Convolution
 
 
@@ -111,15 +111,5 @@ class res_unet(nn.Module):
         
         
         return up_out_4
-
-
-# class AuxHeadWithPreproc(nn.Module):
-#     def __init__(self, invariant_stream):
-#         super().__init__()
-#         self.invariant_stream = invariant_stream  # existing nn.Sequential
-#         self.final_conv = Convolution(spatial_dims=3,in_channels=8,out_channels=1,strides=1,kernel_size=3,dropout=0.2,conv_only=True)
-#     def forward(self, x):
-#         return self.final_conv(x)
-
 
 

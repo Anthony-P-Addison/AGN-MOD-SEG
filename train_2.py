@@ -1,13 +1,12 @@
 import torch
-from glob import glob
 import os
 from monai.data import decollate_batch
 from monai.inferers import sliding_window_inference
 from monai.metrics import DiceMetric, ConfusionMatrixMetric, MeanIoU
 from monai.transforms import Activations, AsDiscrete, Compose
 from monai.losses import DiceCELoss
-from nets.unet import res_unet as unet_old
-from nets.unet_deep import res_unet as unet_deep
+from nets.multi_unet import res_unet as unet_old
+from nets.agnostic_unet import res_unet as unet_deep
 import numpy as np
 import utils
 import wandb
@@ -178,12 +177,12 @@ def main(train_config,aug_config,database_config,k_fold,args,channels_copy):
         in_channel = len(total_modalities)
 
 
-    if train_config.model_type == "old_unet":
-        print("TRAINING WITH old_unet")
+    if train_config.model_type == "MULTIUNET":
+        print("TRAINING WITH MULTIUNET")
         model = unet_old(in_channels=in_channel).to(device)
 
-    elif train_config.model_type == "deep_unet":
-        print("TRAINING WITH DEEP UNET")
+    elif train_config.model_type == "AGNOSTIC_NET":
+        print("TRAINING WITH AGNOSTIC NET")
         model = unet_deep(in_channels=in_channel,invariant_channel= train_config.domain_invariant_layers).to(device)
 
 
@@ -711,10 +710,7 @@ def main(train_config,aug_config,database_config,k_fold,args,channels_copy):
 
     if wandb_active:
         wandb.finish()
-    # # save best checkpoint to 
-    # if wandb_active:
-    #     wandb.log({"Best_Checkpint_Path":model_save_best_name})
-
+   
    
    
 if __name__ == "__main__":
@@ -733,8 +729,8 @@ if __name__ == "__main__":
  
     #########################
     args = parser.parse_args()
-    args.device_id = 0
-    args.datasets =  "ISLES2022_MSSEG_BRATS_TBI_ATLAS"
+    args.device_id = 1
+    args.datasets = 'WMH'   #"ISLES2022_MSSEG_BRATS_TBI_ATLAS"
     ######################################
 
     train_config = config.Training_config()
