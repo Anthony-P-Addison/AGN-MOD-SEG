@@ -13,7 +13,8 @@ import config
 import argparse
 import tabulate
 from dataloader import create_test_val_loader, get_modalities_drop
-import copy 
+import scipy.ndimage as ndimage
+import copy
 import json 
 
 
@@ -45,6 +46,8 @@ class ModelTester:
         self.device = torch.device(self.cuda_id)
         self.validate_outputs = {} 
         self.test_config.model_file_path = self.checkpoint
+        # Buffer size for tumor region evaluation (configurable)
+        self.buffer_size = getattr(self.args, 'buffer_size', 3)
 
     def setup_modalities(self):
         self.channels_copy = copy.deepcopy(self.database_config.channels)
@@ -175,29 +178,56 @@ class ModelTester:
                 sw_batch_size = 1
 
                
-                val_output = sliding_window_inference(input_data, roi_size, sw_batch_size, model)
+                val_output = sliding_window_inference(input_data, roi_size, sw_batch_size, model, overlap = 0.60)
                 val_outputs = [self.post_trans(i) for i in decollate_batch(val_output)]
                 self.current_sample_logit_predictions.append(val_output[0])
                 
-               
+                # Create buffered mask around tumor labels
+                buffered_mask = self.create_buffered_mask(label, buffer_size=self.buffer_size)
+                
+                # Print some statistics about the buffered region
+                original_tumor_voxels = torch.sum(label > 0).item()
+                buffered_voxels = torch.sum(buffered_mask > 0).item()
+                print(f"Original tumor voxels: {original_tumor_voxels}, Buffered region voxels: {buffered_voxels}")
+                print(f"Label shape: {label.shape}, Buffered mask shape: {buffered_mask.shape}")
+                if val_outputs:
+                    print(f"Prediction shape: {val_outputs[0].shape}")
+                
+                # Apply buffered mask to predictions for evaluation
+                masked_val_outputs = []
+                for pred in val_outputs:
+                    masked_pred = self.apply_mask_to_predictions(pred, buffered_mask)
+                    masked_val_outputs.append(masked_pred)
+                
+                # Also apply mask to ground truth labels for consistent evaluation
+                # Ensure buffered_mask matches label shape
+                if buffered_mask.shape != label.shape:
+                    while len(buffered_mask.shape) < len(label.shape):
+                        buffered_mask = buffered_mask.unsqueeze(0)
+                    while len(buffered_mask.shape) > len(label.shape):
+                        buffered_mask = buffered_mask.squeeze(0)
+                
+                masked_label = label * buffered_mask
 
                 # add the val output to a dictionary with the combination as the key and the val output as the value.
                 
                 self.current_sample_label.append(label)
-                current_dice = self.dice_metric(y_pred=val_outputs, y=label)
-                print(f"Current dice: {current_dice}")
-                self.sensitivity_metric(y_pred=val_outputs, y=label)
-                self.precision_metric(y_pred=val_outputs, y=label)
-                self.IOU_metric(y_pred=val_outputs, y=label)
+                
+                # Evaluate using masked predictions and labels (only in buffered tumor regions)
+                current_dice = self.dice_metric(y_pred=masked_val_outputs, y=masked_label)
+                print(f"Current dice (buffered region): {current_dice}")
+                self.sensitivity_metric(y_pred=masked_val_outputs, y=masked_label)
+                self.precision_metric(y_pred=masked_val_outputs, y=masked_label)
+                self.IOU_metric(y_pred=masked_val_outputs, y=masked_label)
 
                 
 
                 if self.test_config.save_segs:
-                    file_save_path = self.test_config.save_path + str(steps) + "_" + str(current_dice) + ".nii.gz"
-                    utils.save_nifti(val_outputs[0], file_save_path, val_data[3]["affine"])
+                    file_save_path = self.test_config.save_path + str(steps) + "_" + str(current_dice) + "_buffered.nii.gz"
+                    utils.save_nifti(masked_val_outputs[0], file_save_path, val_data[3]["affine"])
 
                 # Clear intermediate variables to free memory
-                del input_data, label, val_outputs
+                del input_data, label, val_outputs, masked_val_outputs, buffered_mask, masked_label
                 torch.cuda.empty_cache()
                 
                 steps += 1
@@ -213,6 +243,7 @@ class ModelTester:
             self.precision_metric.reset()
             self.IOU_metric.reset()
 
+            print(f'\n=== Buffered Region Evaluation (buffer size: {self.buffer_size} pixels) ===')
             print(f'\n  mdice: {np.round(metric[dataset]["dice"], 4)}\n ')
             print(f'\n  sensitivity: {np.round(metric[dataset]["sensitivity"], 4)}\n ')
             print(f'\n  precision: {np.round(metric[dataset]["precision"], 4)}\n ')
@@ -260,13 +291,11 @@ class ModelTester:
         # Get the number of modalities to test
         modalities = self.args.modalities_to_test.split("_")
         original_modalities = self.args.modalities_to_test  # Store original value
-
-  
         
-        for i in [int(x) for x in modalities]:
-            # print(f"\nProcessing modality {i+1}/{len(modalities)}")
+        for i in range(len(modalities)):
+            print(f"\nProcessing modality {i+1}/{len(modalities)}")
             self.args.modalities_to_test = str(i)
-            
+            self.args.test_all_combinations = 0
             
             # Create a new tester instance with current args
             tester = ModelTester(self.args, self.checkpoint)
@@ -323,6 +352,59 @@ class ModelTester:
     def return_dictionary_and_label(self):
         return self.validate_outputs,self.current_sample_label
 
+    def create_buffered_mask(self, label, buffer_size=3):
+        """
+        Create a buffered mask around tumor labels.
+        
+        Args:
+            label: Ground truth label tensor
+            buffer_size: Number of pixels to expand around the tumor (default: 3)
+        
+        Returns:
+            buffered_mask: Binary mask with buffer around tumor regions
+        """
+        # Convert to numpy for morphological operations
+        label_np = label.cpu().numpy()
+        
+        # Create binary mask where tumor exists (assuming tumor label is 1)
+        tumor_mask = (label_np > 0).astype(np.uint8)
+        
+        # Apply dilation to create buffer around tumor
+        buffered_mask = ndimage.binary_dilation(
+            tumor_mask, 
+            iterations=buffer_size, 
+            border_value=0
+        ).astype(np.float32)
+        
+        # Convert back to tensor on same device as original label
+        buffered_mask_tensor = torch.from_numpy(buffered_mask).to(label.device)
+        
+        return buffered_mask_tensor
+
+    def apply_mask_to_predictions(self, predictions, mask):
+        """
+        Apply mask to predictions to only evaluate in specified regions.
+        
+        Args:
+            predictions: Model predictions
+            mask: Binary mask to apply
+            
+        Returns:
+            masked_predictions: Predictions only in masked regions
+        """
+        # Ensure mask has the same shape as predictions
+        if mask.shape != predictions.shape:
+            # Expand mask to match prediction dimensions if needed
+            while len(mask.shape) < len(predictions.shape):
+                mask = mask.unsqueeze(0)
+            # Or squeeze if mask has extra dimensions
+            while len(mask.shape) > len(predictions.shape):
+                mask = mask.squeeze(0)
+        
+        # Apply mask to predictions (set non-masked regions to 0)
+        masked_predictions = predictions * mask
+        return masked_predictions
+
 
 
 
@@ -357,19 +439,23 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model_name", help="The name of the model to test", type=str, default=None
     )
+    parser.add_argument(
+        "--buffer_size", help="Buffer size (in pixels) to add around tumor labels for evaluation", type=int, default=3
+    )
 
     args = parser.parse_args()
 
     ####################
 
-    args.datasets_to_test = 'ISLES'
-    args.modalities_to_test = "0_1_2" #ic order of modalities
+    args.datasets_to_test = 'VOETS2'
+    args.modalities_to_test = "0_1" #ic order of modalities
     args.test_all_combinations = 0
-    args.device_id = 0
-    args.trained_on = "TBI_WMH_BRATS_MSSEG_ATLAS" #DATASETS the model was trained on
-    args.checkpoint = 'models/WMH_PRELIM_TEST/_model_remove:_None/TBI_WMH_BRATS_MSSEG_ATLAS/2025-06-13_19-14/WMH_PRELIM_TEST_random_drop_True_2025-06-13_19-14_Epoch_599.pth' #'models/BASELINE/models_run2/models/WMH_PRELIM_TEST/_model_remove:_FLAIR/TBI_ISLES2022_BRATS_MSSEG_ATLAS/2025-06-17_12-20/WMH_PRELIM_TEST_random_drop_True_2025-06-17_12-20_Epoch_549.pth' #'models/Agnostic_channel/_model_remove:_FLAIR/ISLES2022_MSSEG_BRATS_TBI_ATLAS/2025-09-03_12-27/Agnostic_channel_random_drop_True_2025-09-03_12-27_Epoch_599.pth'        # None if using the pre defined checkpoints in checkpoint_paths.json and model name for own models.
-    args.model_name = 'own_checkpoint'   # only applicable is checkpoint is None 
-  
+    args.device_id = 1
+    args.trained_on = "TBI_ISLES2022_BRATS_MSSEG_ATLAS" #DATASETS the model was trained on
+    args.checkpoint =    'models/Agnostic_channel/_model_remove:_None/ISLES2022_MSSEG_BRATS_TBI_ATLAS_VESTIBS_WMH/2025-08-31_19-12/Agnostic_channel_random_drop_True_2025-08-31_19-12_Epoch_599.pth'          # None if using the pre defined checkpoints in checkpoint_paths.json and model name for own models.
+    args.model_name = 'own_checkpoint'   # only applicable is checkpoint is None
+    args.buffer_size = 3  # Buffer size around tumor labels for evaluation 
+
     single_slot_model = False
     
     ######################################################
@@ -387,6 +473,4 @@ if __name__ == "__main__":
         tester = ModelTester(args,checkpoint)
         tester.single_slot_ensemble()
             
-
-
 

@@ -208,7 +208,7 @@ def main(args,k_fold: None):
         epoch_loss = 0
         step = 0
 
-        # drop learning rate
+        # drop learning rateFoundation models are currently at the forefront of research, and if this work isn't completed soon, other groups may develop brain lesion foundation models first.
         if train_config.drop_learning_rate and epoch >= train_config.drop_learning_rate_epoch:
             for g in optimizer.param_groups:
                 g['lr'] = train_config.drop_learning_rate_value

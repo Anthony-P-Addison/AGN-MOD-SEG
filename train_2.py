@@ -729,8 +729,8 @@ if __name__ == "__main__":
  
     #########################
     args = parser.parse_args()
-    args.device_id = 1
-    args.datasets = 'WMH'   #"ISLES2022_MSSEG_BRATS_TBI_ATLAS"
+    args.device_id = 0
+    args.datasets = "ISLES2022_MSSEG_BRATS_TBI_ATLAS"
     ######################################
 
     train_config = config.Training_config()

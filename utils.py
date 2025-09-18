@@ -11,6 +11,7 @@ from augment_utils import spatial_contrast_aug
 from nets.agnostic_residual_block_identity import ResidualUnit_changed as ResidualUnit
 from nets.agnostic_unet import Convolution
 import torch.nn as nn
+import os
 
 def rand_assign_channels(dataset_modalities: list[int], total_modalities: list[str])-> list[int]:
     """Randomly assign channels to the batch"""
@@ -250,7 +251,9 @@ def save_nifti(tensor: torch.Tensor, file_path: str,affine):
     vars_numpy = tensor[0].cpu().detach().numpy()
     vars_numpy = np.squeeze(vars_numpy)
     # vars_numpy = np.transpose(vars_numpy,(1,2,3,0))    
-    new_image = nib.Nifti1Image(vars_numpy,affine=affine.squeeze())       
+    new_image = nib.Nifti1Image(vars_numpy,affine=affine.squeeze())  
+    #ensure file path exist
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
     nib.save(new_image, file_path)
 
 #######################
@@ -518,7 +521,7 @@ def load_test_checkpoints(model_name:str,checkpoint_own:str):
     """load checkpoints eother  models trained by author or own checkpoints"""
     import json 
 
-    if model_name is not 'own_checkpoint':
+    if model_name != 'own_checkpoint':
         with open('checkpoint_paths.json', 'r') as f:
             checkpoint_paths = json.load(f)
         

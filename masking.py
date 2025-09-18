@@ -121,15 +121,15 @@ def create_and_save_mask(img_file_path, output_mask_path, threshold_factor, corn
         print(f"  Error processing {img_file_path}: {e}")
         return False
 
-def main():
+def main(input_base_dir, output_base_dir, datasets, threshold_factor, corner_size, img_pattern):
     # --- Configuration Section (EDIT THESE VALUES) ---
 
-    input_base_dir = "data"  # Base directory containing dataset subfolders
-    output_base_dir = "data" # Base directory where mask subfolders will be created
-    datasets = ["TUMOUR2"]     # List of dataset subfolder names to process
-    threshold_factor = 1                          # Factor to multiply median corner value by
-    corner_size = 5                                   # Size of the cube edge to sample from corners
-    img_pattern = "*.nii.gz"                          # Glob pattern for image files (e.g., '*.nii.gz', '*.nii*')
+    # input_base_dir = "data"  # Base directory containing dataset subfolders
+    # output_base_dir = "data" # Base directory where mask subfolders will be created
+    # datasets = ["TUMOUR2"]     # List of dataset subfolder names to process
+    # threshold_factor = 1                          # Factor to multiply median corner value by
+    # corner_size = 5                                   # Size of the cube edge to sample from corners
+    # img_pattern = "*.nii.gz"                          # Glob pattern for image files (e.g., '*.nii.gz', '*.nii*')
     # --- End Configuration Section ---
 
     print(f"Starting mask generation...")
@@ -186,5 +186,17 @@ def main():
     print(f"Overall Summary: {total_succeeded}/{total_processed} masks generated successfully across all datasets.")
     print("Mask generation complete.")
 
+
+
+
+
 if __name__ == "__main__":
-    main()
+    # --- Configuration Section (EDIT THESE VALUES) ---
+    input_base_dir = "data"  # Base directory containing dataset subfolders
+    output_base_dir = "data" # Base directory where mask subfolders will be created
+    datasets = ["VESTIBS"]     # List of dataset subfolder names to process
+    threshold_factor = 1                          # Factor to multiply median corner value by
+    corner_size = 5                                   # Size of the cube edge to sample from corners
+    img_pattern = "*.nii.gz"                          # Glob pattern for image files (e.g., '*.nii.gz', '*.nii*')
+    # --- End Configuration Section ---
+    main(input_base_dir, output_base_dir, datasets, threshold_factor, corner_size, img_pattern)

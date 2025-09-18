@@ -18,6 +18,7 @@ def spatial_contrast_aug(
     blur_sigma_range: tuple = (0.5, 0.5),  # 0.5 0.5
     dilation_iterations: int = 1,
     plot_image: bool = False,
+    lam_params: tuple = (0.7, 1),
 ):
     """
     Apply spatial contrast augmentation by modifying intensity in brain and tumor regions,
@@ -85,7 +86,7 @@ def spatial_contrast_aug(
 
         # --- 2. MixUP | BRAIN TISSUE ---
         if random.random() < aug_config.prob_brain_mixup:
-            working_img = MixUp(batch_img,working_img,channel_add,brain_mask_bool,lam_params = (0.7, 1))
+            working_img = MixUp(batch_img,working_img,channel_add,brain_mask_bool,lam_params = lam_params)
             significant_aug_applied = True  # Mixup is significant
 
         # --- 3. INTENSITY/CONTRAST | BRAIN TISSUE  ---
@@ -108,7 +109,7 @@ def spatial_contrast_aug(
         ################### Pathology Brain Tissue Augmentations ###################
 
         # --- 0. Pathology Modality Switch (Applied first) ---
-        if random.random() < aug_config.prob_pathology_switch:
+        if random.random() < aug_config.prob_lesion_switch:
             possible_tumor_channels = [i for i in range(batch_img.shape[0]-1) if i not in channel_add ]
             tumor_channel = random.choice(possible_tumor_channels)
             working_pathology_img = torch.where(tumor_mask_bool, batch_img[tumor_channel], img)
@@ -123,7 +124,7 @@ def spatial_contrast_aug(
 
             # --- 2. MixUP | PATHOLOGY TISSUE ---
             if random.random() < aug_config.prob_pathology_mixup:
-                working_pathology_img = MixUp(batch_img,working_pathology_img,channel_add,tumor_mask_bool,lam_params = (0.7, 1))
+                working_pathology_img = MixUp(batch_img,working_pathology_img,channel_add,tumor_mask_bool,lam_params = lam_params)
                 significant_aug_applied = True  # Pathology mixup is significant
 
             # --- 3. INTENSITY/CONTRAST | PATHOLOGY TISSUE ---
@@ -270,7 +271,7 @@ def plot_augmentation(
         plt.close()
 
 
-def MixUp(x:torch.tensor, working_image:torch.tensor,channel_add:int,mask:torch.tensor,lam_params:tuple = (0.7, 1)):
+def MixUp(x:torch.tensor, working_image:torch.tensor,channel_add:int,mask:torch.tensor,lam_params:tuple = (0.7,1)):
     """
     Apply mixup contrast augmentation to the input tensor x.
     Args:

@@ -10,8 +10,8 @@ class Training_config():
     # Training Parameters
     epoch:int  = 600
     workers:int = 2 #numworker
-    train_batch_size: int = 2 
-    val_interval:int = 4 #number of epochs between the validation         
+    train_batch_size: int = 2
+    val_interval:int = 8 #number of epochs between the validation         
     model_type:str = "AGNOSTIC_NET"   # AGNOSTIC_NET, MULTIUNET
     cropped_input_size:tuple = (96,96,96)
     # lr_config
@@ -26,7 +26,7 @@ class Training_config():
     load_pre_trained_model:bool = False  # if true will load pre-train model  
     load_model_path:Path =  'models/WMH_PRELIM_TEST/_model_remove:_FLAIR/TBI_ISLES2022_BRATS_MSSEG_ATLAS/2025-06-30_12-04/WMH_PRELIM_TEST_random_drop_True_2025-06-30_12-04_Epoch_49.pth'
     ## Remove modality from the training set (can use for testing the agnostic channel)
-    modality_remove ='FLAIR' # Can be: str, list, or None. Single modality (str) or multiple modalities (list) to remove. None if no modality to be dropped 
+    modality_remove = 'FLAIR' # Can be: str, list, or None. Single modality (str) or multiple modalities (list) to remove. None if no modality to be dropped 
     random_drop:int = 1 # 1 for to be dropped and 0 for not to be dropped. 
     #### admin  ####
     wandb_active:bool = True
@@ -55,10 +55,10 @@ class Database_config():
     # the modalities for each database
     channels["BRATS"] = ["FLAIR", "T1", "T1c", "T2"]
     channels["ATLAS"] = ["T1"]
-    channels["MSSEG"] = ["FLAIR", "T1", "T1c", "T2", "PD"]
-    channels["ISLES"] = ["FLAIR", "T1", "T2","DWI"]      # DWI change to invar channel   invar 
+    channels["MSSEG"] = ['FLAIR', "T1", "T1c", "T2", "PD"]
+    channels["ISLES"] = ["FLAIR", "T1", "T2"," DWI"]      # DWI change to invar channel   invar 
     channels["WMH"] = ["FLAIR", "T1"]
-    channels["VOETS2"] = ["FLAIR","T2","T1c"]
+    channels["VOETS2"] = ["T1c","T2"]  # DOUBLE CHECK.   
     channels["TBI"] = ["FLAIR", "T1", "T2", "SWI"]
     channels["ISLES2022"] = ['ADC','DWI','FLAIR'] 
     channels["TUMOUR2"]  = ['T1']
@@ -69,10 +69,10 @@ class Database_config():
     train_size["BRATS"] = 444 #444  # 50
     train_size["ATLAS"] = 459  #459   # 50
     train_size["MSSEG"] = 37   # 37 
-    train_size["ISLES"] =1  #19
+    train_size["ISLES"] =0  #19
     train_size["WMH"] = 42
     train_size["TBI"] = 156   #156  # 50
-    train_size["VOETS2"] = 3
+    train_size["VOETS2"] = 0
     train_size["ISLES2022"] = 175 #175    #50
     train_size["TUMOUR2"] = 1 
     train_size["VESTIBS"] = 176
@@ -83,7 +83,7 @@ class Database_config():
     total_size["ISLES"] = 28   # test 9 and train 19
     total_size["WMH"] = 60
     total_size["TBI"] = 281
-    total_size["VOETS2"] = 7 
+    total_size["VOETS2"] = 30
     total_size["ISLES2022"] = 250   
     total_size["TUMOUR2"] = 57   # 51 
     total_size["VESTIBS"] = 242
@@ -128,7 +128,7 @@ class Database_config():
     val_size["MSSEG"] = 15
     val_size["WMH"] = 18
     val_size["TBI"] = 125
-    val_size["VOETS2"] = 4
+    val_size["VOETS2"] = 30
     val_size["ISLES2022"] = 75
     val_size["ISLES"] = 28   #28  #9
     val_size["TUMOUR2"] = 57  #10
@@ -148,19 +148,19 @@ class Database_config():
 
 class Test_config():
     save_segs:bool = False  # True to save the segmentation outputs
-    save_path:Path = "save_segs/"  # save niftis generated
+    save_path:Path = "save_segs/VOETS2____MSSES_BRATS_ATLAS_VESTIBS_TBI_ISLES2022_WMH/"  # save niftis generated
     #model_file_path:Path = 'models/Mixup/_model_remove:_None/ATLAS_MSSEG_TBI_BRATS_WMH/2025-02-15_19-10/Mixup_random_drop_TrueATLAS_MSSEG_TBI_BRATS_WMH2025-02-15_19-10_BEST_AVERAGE.pth'#'models/Mixup/_model_remove:_FLAIR/MSSEG_BRATS_ATLAS_TBI_ISLES/2025-02-04_23-08/Mixup_random_drop_TrueMSSEG_BRATS_ATLAS_TBI_ISLES2025-02-04_23-08_BEST_AVERAGE.pth'  #models/new_test_BRATS_ATLAS_WMH_MSSEG_TBI_random_drop_0_Epoch_599.pth' #'models/Train_BRATS_TBI_ATLAS_MSSEG_WMH.pth' # "models/new_test_BRATS_ATLAS_WMH_MSSEG_TBI_random_drop_0_checkpoint_Epoch_599.pt"  # "models/MSSEG/_random_drop_0_2024-12-04_16-15_checkpoint_Epoch_99.pt" #"models/MSSEG/rand_slot_allocation_random_drop_0_2024-12-09_16-01_checkpoint_Epoch_99.pt"
     model_net_type: str = "unet_deep"    # 'unet_old', 'unet_deep' # the type of the pre-train model
-    num_modalities_trained_on: int = 7 # the number of modalities included in training
+    num_modalities_trained_on: int = 6# the number of modalities included in training
     #: dict[str,list[int]] = {"VOETS2":[3,5,4],"BRATS":[1,3,4,5], "ATLAS":[3], "MSSEG":[1,3,4,5,0], "ISLES":[1,3,5,0], "TBI":[1,3,5,2], "WMH":[1,3]} #The allocated channel index of the modalities(each channel) in the testing databases (start from 0) For example "ATLAS": [3] means the T1 modality in ATLAS will be allocated to the forth channel "VOETS2":[1,5],
     
     # Slot 
-    rand_assign:bool = False # True to randomly assign the channels to the model
+    rand_assign:bool = True # True to randomly assign the channels to the model
     domain_invariant_slot:bool =  False
-    single_slot:bool = True
+    single_slot:bool = False
     modality_remove = 'DWI' #Can be: str, list, or None. Modalities to be completely removed during test in dataloader. 
     invariant_layers:bool = False
-    modality_rem_train: str = 'ADC' # the modality that was removed during training and now want to test in the invariant slot.
+    modality_rem_train: str = None # the modality that was removed during training and now want to test in the invariant slot.
 
 
 
@@ -178,8 +178,8 @@ class Finetune_config:
     drop_learning_rate_value:float = 5e-6   # can lower this for finetuning
    
     # model_save_path
-    modality_remove:str = None  # the modality to be removed (useful for testing invariant slot on this modality). None if no modality to be dropped
-    project_name:str = "UPPER_BOUND_FINETUNE"   # wandb project name:   # all_in_one   # shuffle_slots  # modality_invariant_slot
+    modality_remove:str = 'FLAIR'  # the modality to be removed (useful for testing invariant slot on this modality). None if no modality to be dropped
+    project_name:str = "VOETS2_study"   # wandb project name:   # all_in_one   # shuffle_slots  # modality_invariant_slot
     model_save_path:str = "models/" + project_name + "/" # path to save the model
     wandb_report:bool = True
 
@@ -197,8 +197,6 @@ class Finetune_config:
 
 
 
-
-
 class Augmentation_config:
     ##### Brain Tissue Augmentations #####
     prob_brain_invert: float = 0 #0.5 
@@ -209,7 +207,7 @@ class Augmentation_config:
     brain_factor_intensity: tuple = (-0.2, 0.2)
 
     ##### Pathology Tissue Augmentations #####
-    prob_pathology_switch: float = 0 #0.75 
+    prob_lesion_switch: float = 0 #0.75 
     prob_pathology_invert: float = 0 #0.5  
     prob_pathology_mixup: float = 0 #0.5 
     prob_tumor_scale_shift: bool = False
@@ -219,10 +217,10 @@ class Augmentation_config:
 
     ##### Uniform Augmentations #####
     # uniform augmentations apply same probability to both pathology and the healthy brain tissue,
-    uniform_augs: bool = True
-    uniform_scale_shift: bool = True
-    uniform_mix_up: float = 0.5
-    uniform_invert: float = 0.5
+    uniform_augs: bool = False
+    uniform_scale_shift: bool = False
+    uniform_mix_up: float = 0
+    uniform_invert: float = 0
 
 
 
