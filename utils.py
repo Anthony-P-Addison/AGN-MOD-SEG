@@ -13,17 +13,25 @@ from nets.agnostic_unet import Convolution
 import torch.nn as nn
 import os
 
-def rand_assign_channels(dataset_modalities: list[int], total_modalities: list[str])-> list[int]:
+
+def rand_assign_channels(
+    dataset_modalities: list[int], total_modalities: list[str]
+) -> list[int]:
     """Randomly assign channels to the batch"""
     num_to_assign = len(dataset_modalities)
     all_indices = list(range(len(total_modalities)))
     assigned_indices = random.sample(all_indices, num_to_assign)
     return assigned_indices
 
-def map_channels(dataset_channels: list[str], total_modalities: list[str],rand_assign: bool,) -> list[int]:
+
+def map_channels(
+    dataset_channels: list[str],
+    total_modalities: list[str],
+    rand_assign: bool,
+) -> list[int]:
     """map specific dataset channels to total modalities
     dataset_channesl: list of modalities in dataset in question
-    total_modalities: list of all possible modalities across all datasets used """
+    total_modalities: list of all possible modalities across all datasets used"""
     channel_map = []
     for channel in dataset_channels:
         if channel not in total_modalities:
@@ -32,10 +40,10 @@ def map_channels(dataset_channels: list[str], total_modalities: list[str],rand_a
         for index, modality in enumerate(total_modalities):
             if channel == modality:
                 channel_map.append(index)
-            
+
     if rand_assign:
         random.shuffle(channel_map)
-        
+
     return channel_map
 
 
@@ -85,7 +93,7 @@ def rand_set_channels_to_zero_with_invar(
     combination_map: list = None,
     augmentation_config = None,
 ) -> tuple[list[int], torch.Tensor]:
-    """Randomly set channels to zero and handle invariant channel with optional augmentations"""
+    """Randomly set channels to zero and handle agnostic channel with optional augmentations"""
     all_modalities_remaining = []
     all_modalities_dropped = []
     
@@ -100,16 +108,7 @@ def rand_set_channels_to_zero_with_invar(
         original_batch = torch.cat((original_batch, torch.zeros((original_batch.shape[0], 1, original_batch.shape[2], original_batch.shape[3], original_batch.shape[4]))),dim=1)
         
     for i in range(working_batch.shape[0]):   
-        # Uniform dropout probability for all cases
-        # number_of_dropped_modalities = np.random.randint(0, len(dataset_modalities))
-        # modalities_dropped = random.sample(
-        #     list(np.arange(len(dataset_modalities))),
-        #     number_of_dropped_modalities,
-        # )
-        # modalities_dropped.sort()
-
-        # provide evey combination of modalities and then randomly select when training.
-        # want to ensure invariatn channel is trained on more times for each combination. 
+    
         modalities_remaining = random.choice(combination_map)
         modalities_dropped = list(set(np.arange(len(dataset_modalities))) - set(modalities_remaining))
 
@@ -122,10 +121,7 @@ def rand_set_channels_to_zero_with_invar(
                 print(f"Warning: Modality {mod} was not properly zeroed")
                 working_batch[i,mod,:,:,:] = 0  # Force zero if not already zero
         
-        # modalities_remaining = sorted(
-        #     set(np.arange(len(dataset_modalities))) - set(modalities_dropped))
-     
-        # Handle invariant channel with augmentations
+        # Handle aggnostic channel with augmentations
         if domain_invariant and len(dataset_modalities) > 2:
             invar = None
           
@@ -212,205 +208,245 @@ def create_net(model_file_path,model_net_type,model_modalities_trained_on, devic
 
 
 def create_modality_combinations(modalities: list):
-    
+
     modality_combinations = []
-    for i in range(1,len(modalities)+1):   
-      modality_combinations = modality_combinations + list(combinations(modalities,i))
+    for i in range(1, len(modalities) + 1):
+        modality_combinations = modality_combinations + list(
+            combinations(modalities, i)
+        )
     return modality_combinations
 
 
-def create_UNET_input(batch, modalities, dataset_name,model_modalities_trained_on,model_channel_map):
-    """Create input data for UNET model"""   
+def create_UNET_input(
+    batch, modalities, dataset_name, model_modalities_trained_on, model_channel_map
+):
+    """Create input data for UNET model"""
     zeros_arr = np.zeros_like(batch[0])
-    zeros_arr[:,modalities,:,:,:] = np.array(batch[0][:,modalities,:,:,:])
+    zeros_arr[:, modalities, :, :, :] = np.array(batch[0][:, modalities, :, :, :])
     batch[0] = torch.from_numpy(zeros_arr)
-    input_data = torch.from_numpy(np.zeros((1,model_modalities_trained_on,batch[0].shape[2],batch[0].shape[3],batch[0].shape[4]),dtype=np.float32))
-    input_data[:,model_channel_map[dataset_name],:,:,:] = batch[0][:,range(0,batch[0].shape[1]),:,:,:]
-    #batch[0][:,range(0,batch[0].shape[1]),:,:,:]
+    input_data = torch.from_numpy(
+        np.zeros(
+            (
+                1,
+                model_modalities_trained_on,
+                batch[0].shape[2],
+                batch[0].shape[3],
+                batch[0].shape[4],
+            ),
+            dtype=np.float32,
+        )
+    )
+    input_data[:, model_channel_map[dataset_name], :, :, :] = batch[0][
+        :, range(0, batch[0].shape[1]), :, :, :
+    ]
+    # batch[0][:,range(0,batch[0].shape[1]),:,:,:]
     return input_data
 
-def create_single_channel_UNET_input(batch, modalities, dataset_name,model_modalities_trained_on,model_channel_map):
+
+def create_single_channel_UNET_input(
+    batch, modalities, dataset_name, model_modalities_trained_on, model_channel_map
+):
     """Create single channel input data for UNET model"""
     if len(modalities) != 1:
-        raise ValueError("Single slot is selected, but more than one modality is provided")
-    input_data = batch[0][:,modalities,:,:,:]
+        raise ValueError(
+            "Single slot is selected, but more than one modality is provided"
+        )
+    input_data = batch[0][:, modalities, :, :, :]
     return input_data
 
 
-
-
-def create_UNET_input_quicktest(batch, modalities, channel_map, model_modalities_trained_on):
-    zeros_arr = np.zeros_like(batch[0])
-    zeros_arr[:,modalities,:,:,:] = np.array(batch[0][:,modalities,:,:,:])
-    batch[0] = torch.from_numpy(zeros_arr)
-    input_data = torch.from_numpy(np.zeros((1,model_modalities_trained_on,batch[0].shape[2],batch[0].shape[3],batch[0].shape[4]),dtype=np.float32))
-    input_data[:,channel_map,:,:,:] = batch[0][:,range(0,batch[0].shape[1]),:,:,:]
-    return input_data
-
-def save_nifti(tensor: torch.Tensor, file_path: str,affine):
+def save_nifti(tensor: torch.Tensor, file_path: str, affine):
     vars_numpy = tensor[0].cpu().detach().numpy()
     vars_numpy = np.squeeze(vars_numpy)
-    # vars_numpy = np.transpose(vars_numpy,(1,2,3,0))    
-    new_image = nib.Nifti1Image(vars_numpy,affine=affine.squeeze())  
-    #ensure file path exist
+    # vars_numpy = np.transpose(vars_numpy,(1,2,3,0))
+    new_image = nib.Nifti1Image(vars_numpy, affine=affine.squeeze())
+    # ensure file path exist
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
     nib.save(new_image, file_path)
-
-#######################
-
-def modality_select_invar(dataset: list, modality: str) -> list:
-    """Select a modality to be inserted into the invar channel at test time"""
-
-    updated_modalities = ["invar" if m == modality else m for m in dataset]
-        
-    return updated_modalities
-
-
 
 
 ####### Randomly initiating Agnostic channel and Agnostic channel + Agnostic pathway #######
 
-
-def add_invar_input_to_pre_trained(model:dict)-> dict:
-
+def add_invar_input_to_pre_trained(model: dict) -> dict:
     """Add additional input channel (randomly initialised weights) to the first layer of a pre trained model"""
 
-    #input size of first layer
-    input_size = model['conv_1.conv.unit0.conv.weight'].shape[1]
+    # input size of first layer
+    input_size = model["conv_1.conv.unit0.conv.weight"].shape[1]
 
-    print(f'Input channels of model: {input_size}')
-    # additinal input channel 
+    print(f"Input channels of model: {input_size}")
+    # additinal input channel
     num_input_channels = input_size + 1
     # create a new Conv3d layer with an additional input channel
     # new_conv = torch.nn.Conv3d(num_input_channels, 7, kernel_size=3, stride=1, padding=1, bias=True)
-    new_conv1 =  ResidualUnit(spatial_dims=3, in_channels=num_input_channels, out_channels=8,strides=1, kernel_size=3, subunits=1, dropout=0.2)
-    new_down_conv1 = Convolution(spatial_dims=3,in_channels=8,out_channels=32,strides=1,kernel_size=3,dropout=0.2)
-    
-      
+    new_conv1 = ResidualUnit(
+        spatial_dims=3,
+        in_channels=num_input_channels,
+        out_channels=8,
+        strides=1,
+        kernel_size=3,
+        subunits=1,
+        dropout=0.2,
+    )
+    new_down_conv1 = Convolution(
+        spatial_dims=3,
+        in_channels=8,
+        out_channels=32,
+        strides=1,
+        kernel_size=3,
+        dropout=0.2,
+    )
+
     # copy the weights from the old conv layer to the new conv layer
     with torch.no_grad():
-        new_conv1.conv[0].conv.weight[:input_size, :input_size, :, :, :] = model['conv_1.conv.unit0.conv.weight']
-        new_conv1.conv[0].conv.bias[:input_size] = torch.nn.Parameter(model['conv_1.conv.unit0.conv.bias'])  # Convert to torch.nn.Parameter
-        new_down_conv1.conv.weight[:,:input_size, :, :, :] = model['down_conv_1.conv.weight']
-        new_down_conv1.conv.bias[:] = torch.nn.Parameter(model['down_conv_1.conv.bias'])  # Convert to torch.nn.Parameter
+        new_conv1.conv[0].conv.weight[:input_size, :input_size, :, :, :] = model[
+            "conv_1.conv.unit0.conv.weight"
+        ]
+        new_conv1.conv[0].conv.bias[:input_size] = torch.nn.Parameter(
+            model["conv_1.conv.unit0.conv.bias"]
+        )  # Convert to torch.nn.Parameter
+        new_down_conv1.conv.weight[:, :input_size, :, :, :] = model[
+            "down_conv_1.conv.weight"
+        ]
+        new_down_conv1.conv.bias[:] = torch.nn.Parameter(
+            model["down_conv_1.conv.bias"]
+        )  # Convert to torch.nn.Parameter
     # replace the old conv layer with the new conv layer in the model
-    model['conv_1.conv.unit0.conv.weight'] = new_conv1.conv[0].conv.weight
-    model['conv_1.conv.unit0.conv.bias'] = new_conv1.conv[0].conv.bias
-    model['down_conv_1.conv.weight'] = new_down_conv1.conv.weight
-    model['down_conv_1.conv.bias'] = new_down_conv1.conv.bias
+    model["conv_1.conv.unit0.conv.weight"] = new_conv1.conv[0].conv.weight
+    model["conv_1.conv.unit0.conv.bias"] = new_conv1.conv[0].conv.bias
+    model["down_conv_1.conv.weight"] = new_down_conv1.conv.weight
+    model["down_conv_1.conv.bias"] = new_down_conv1.conv.bias
 
-    print(f'Input channels of model after update: {model["conv_1.conv.unit0.conv.weight"].shape[1]}')
-    print(f'Input channels of model after update: {model["conv_1.conv.unit0.conv.weight"][1][4]}')
-
+    print(
+        f'Input channels of model after update: {model["conv_1.conv.unit0.conv.weight"].shape[1]}'
+    )
+    print(
+        f'Input channels of model after update: {model["conv_1.conv.unit0.conv.weight"][1][4]}'
+    )
 
     return model
 
 
-def add_invar_layers_to_pre_trained(model:dict, invariant_out_channels: int = 8, dropout: float = 0.2)-> dict:
+def add_invar_layers_to_pre_trained(
+    model: dict, invariant_out_channels: int = 8, dropout: float = 0.2
+) -> dict:
     """Modify model dict to match unet_deep architecture with invariant channels enabled: used for finetuning the model with designated agnostic channel"""
 
     # Get original layer dimensions (includes invariant channel)
-    original_input_size = model['conv_1.conv.unit0.conv.weight'].shape[1]
-    conv1_out_channels = model['conv_1.conv.unit0.conv.weight'].shape[0]
-    down_conv1_out_channels = model['down_conv_1.conv.weight'].shape[0]
-    
+    original_input_size = model["conv_1.conv.unit0.conv.weight"].shape[1]
+    # conv1_out_channels = model["conv_1.conv.unit0.conv.weight"].shape[0]
+    # down_conv1_out_channels = model["down_conv_1.conv.weight"].shape[0]
+
     # In unet_deep: modality_channels = in_channels - 1 (excluding invariant channel)
-  
+
     modality_channels = original_input_size
 
-    
+    print(f"Original input channels: {original_input_size}")
+    print(f"Modality channels : {modality_channels}")
 
-    print(f'Original input channels: {original_input_size}')
-    print(f'Modality channels : {modality_channels}')
+    print(f"Converting to unet_deep architecture...")
 
-
-    print(f'Converting to unet_deep architecture...')
-    
-   
-    #Create invariant stream exactly like unet_deep
+    # Create invariant stream exactly like unet_deep
     invariant_stream = nn.Sequential(
-            ResidualUnit(spatial_dims=3, in_channels=1, out_channels=8, strides=1, kernel_size=3, subunits=1, dropout=dropout),
-            Convolution(spatial_dims=3,in_channels=8,out_channels=16,strides=1,kernel_size=3,dropout=0.2),
-            Convolution(spatial_dims=3,in_channels=16,out_channels=invariant_out_channels,strides=1,kernel_size=3,dropout=0.2))
-        
-    
+        ResidualUnit(
+            spatial_dims=3,
+            in_channels=1,
+            out_channels=8,
+            strides=1,
+            kernel_size=3,
+            subunits=1,
+            dropout=dropout,
+        ),
+        Convolution(
+            spatial_dims=3,
+            in_channels=8,
+            out_channels=16,
+            strides=1,
+            kernel_size=3,
+            dropout=0.2,
+        ),
+        Convolution(
+            spatial_dims=3,
+            in_channels=16,
+            out_channels=invariant_out_channels,
+            strides=1,
+            kernel_size=3,
+            dropout=0.2,
+        ),
+    )
+
     # Create new down_conv_1 for concatenated features (modality_features + invariant_features)
     downstream_in_channels = modality_channels + invariant_out_channels
-    new_down_conv1 = Convolution(spatial_dims=3, in_channels=downstream_in_channels, out_channels=32, strides=2, kernel_size=3, dropout=dropout)
-    
+    new_down_conv1 = Convolution(
+        spatial_dims=3,
+        in_channels=downstream_in_channels,
+        out_channels=32,
+        strides=2,
+        kernel_size=3,
+        dropout=dropout,
+    )
+
     with torch.no_grad():
         # Add invariant stream layers to model state dict
 
-        new_down_conv1.conv.weight[:,:modality_channels, :, :, :] = model['down_conv_1.conv.weight']
-        new_down_conv1.conv.bias[:] = torch.nn.Parameter(model['down_conv_1.conv.bias']) 
+        new_down_conv1.conv.weight[:, :modality_channels, :, :, :] = model[
+            "down_conv_1.conv.weight"
+        ]
+        new_down_conv1.conv.bias[:] = torch.nn.Parameter(model["down_conv_1.conv.bias"])
 
-        model['invariant_stream.0.conv.unit0.conv.weight'] = invariant_stream[0].conv[0].conv.weight
-        model['invariant_stream.0.conv.unit0.conv.bias'] = invariant_stream[0].conv[0].conv.bias
+        model["invariant_stream.0.conv.unit0.conv.weight"] = (
+            invariant_stream[0].conv[0].conv.weight
+        )
+        model["invariant_stream.0.conv.unit0.conv.bias"] = (
+            invariant_stream[0].conv[0].conv.bias
+        )
         # Add the specific ADN component mentioned in error
-        
-        model['invariant_stream.0.conv.unit0.adn.A.weight'] = invariant_stream[0].conv[0].adn.A.weight
-        
+
+        model["invariant_stream.0.conv.unit0.adn.A.weight"] = (
+            invariant_stream[0].conv[0].adn.A.weight
+        )
+
         # Layer 1: Convolution (8 -> 16) - add only required parameters
-        model['invariant_stream.1.conv.weight'] = invariant_stream[1].conv.weight
-        model['invariant_stream.1.conv.bias'] = invariant_stream[1].conv.bias
+        model["invariant_stream.1.conv.weight"] = invariant_stream[1].conv.weight
+        model["invariant_stream.1.conv.bias"] = invariant_stream[1].conv.bias
         # Add the specific ADN component mentioned in error
-        
-        model['invariant_stream.1.adn.A.weight'] = invariant_stream[1].adn.A.weight
-        
-        # Layer 2: Convolution (16 -> invariant_out_channels) - add only required parameters
-        model['invariant_stream.2.conv.weight'] = invariant_stream[2].conv.weight
-        model['invariant_stream.2.conv.bias'] = invariant_stream[2].conv.bias
-        # Add the specific ADN component mentioned in error
-        
-        model['invariant_stream.2.adn.A.weight'] = invariant_stream[2].adn.A.weight
 
-        
+        model["invariant_stream.1.adn.A.weight"] = invariant_stream[1].adn.A.weight
+
+        # Layer 2: Convolution (16 -> invariant_out_channels) - add only required parameters
+        model["invariant_stream.2.conv.weight"] = invariant_stream[2].conv.weight
+        model["invariant_stream.2.conv.bias"] = invariant_stream[2].conv.bias
+        # Add the specific ADN component mentioned in error
+
+        model["invariant_stream.2.adn.A.weight"] = invariant_stream[2].adn.A.weight
+
         # Update down_conv_1 to accept concatenated features (modality_channels + invariant_out_channels -> 32)
         # Copy existing weights for the modality channels part
-        new_down_conv1.conv.weight[:, :modality_channels, :, :, :] = model['down_conv_1.conv.weight'][:, :modality_channels, :, :, :]
+        new_down_conv1.conv.weight[:, :modality_channels, :, :, :] = model[
+            "down_conv_1.conv.weight"
+        ][:, :modality_channels, :, :, :]
         # The additional invariant channels (last 8 channels) will be randomly initialized
-        
-        model['down_conv_1.conv.weight'] = new_down_conv1.conv.weight
-        model['down_conv_1.conv.bias'] = new_down_conv1.conv.bias
-  
-    
-    print(f'✓ Kept conv_1 unchanged: {modality_channels} -> {modality_channels} (modality channels)')
-    print(f'✓ Added invariant_stream: 1 -> 8 -> 16 -> {invariant_out_channels}')
-    print(f'✓ Updated down_conv_1: {downstream_in_channels} -> 32 (concatenated features)')
-    print(f'✓ Architecture flow: modalities({modality_channels}) -> conv_1({modality_channels}) \\')
-    print(f'                                                                        concat({downstream_in_channels}) -> down_conv_1(32)')
-    print(f'                      invariant(1) -> invariant_stream({invariant_out_channels}) /')
-    
-    return model 
 
+        model["down_conv_1.conv.weight"] = new_down_conv1.conv.weight
+        model["down_conv_1.conv.bias"] = new_down_conv1.conv.bias
 
-
-def create_test_val_loader(
-    val_size: int,
-    images,
-    segs,
-    workers,
-    image_only: bool = False,
-):
-    """Create monai wrapped dataloaders for training and validation data"""
-
-    # image augmentation through spatial cropping to size and by randomly rotating
-
-    val_imtrans = Compose([EnsureChannelFirst()])
-    val_segtrans = Compose([EnsureChannelFirst()])
-    # create a training data loader
-
-    # create a validation data loader
-    val_ds = ImageDataset(
-        images[-val_size:],
-        segs[-val_size:],
-        transform=val_imtrans,
-        seg_transform=val_segtrans,
-        image_only=image_only,
+    print(
+        f"✓ Kept conv_1 unchanged: {modality_channels} -> {modality_channels} (modality channels)"
     )
-    
-    val_loader = DataLoader(val_ds, batch_size=1, num_workers=workers, pin_memory=0)
-    return val_loader
+    print(f"✓ Added invariant_stream: 1 -> 8 -> 16 -> {invariant_out_channels}")
+    print(
+        f"✓ Updated down_conv_1: {downstream_in_channels} -> 32 (concatenated features)"
+    )
+    print(
+        f"✓ Architecture flow: modalities({modality_channels}) -> conv_1({modality_channels}) \\"
+    )
+    print(
+        f"                                                                        concat({downstream_in_channels}) -> down_conv_1(32)"
+    )
+    print(
+        f"                      invariant(1) -> invariant_stream({invariant_out_channels}) /"
+    )
+
+    return model
 
 
 
@@ -449,13 +485,10 @@ def lr_schedule(epochs, optimizer):
 
 
 
-###### Test definitions #######
-
-
 
 def ensemble_across_modalities(prediction_dict, threshold=0.5):
     """
-    Ensembles predictions across modalities for each sample index.
+    Ensembles predictions across modalities for each sample index when training single slot model.
 
     Args:
         prediction_dict (dict): keys are modalities, values are lists of predictions (length N).
@@ -489,7 +522,7 @@ def ensemble_across_modalities(prediction_dict, threshold=0.5):
 
 def calculate_dice_scores(predictions, labels, device):
     """
-    Calculates Dice scores for each patient.
+    Calculates Dice scores for each patient for SINGLE CHANNEL MODELS
     """
     from monai.metrics import DiceMetric
     
@@ -514,11 +547,11 @@ def calculate_dice_scores(predictions, labels, device):
         del pred, label
         
     return np.array(dice_scores)
-        
+
 
 
 def load_test_checkpoints(model_name:str,checkpoint_own:str):
-    """load checkpoints eother  models trained by author or own checkpoints"""
+    """load checkpoints either  models trained by author or own checkpoints"""
     import json 
 
     if model_name != 'own_checkpoint':
@@ -541,14 +574,5 @@ def load_test_checkpoints(model_name:str,checkpoint_own:str):
         if checkpoint is None:
             raise ValueError("No checkpoint path provided. Please provide a valid path to a model checkpoint file when using 'own_checkpoint' mode.")
     return checkpoint
-
-
-
-
-
-
-if __name__ == "__main__":
-    breakpoint()
-
 
 
