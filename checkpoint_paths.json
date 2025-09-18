@@ -1,0 +1,50 @@
+
+
+
+
+{
+    "setting_1_standard": {
+        "description": "Setting 1: Baseline model without any special modifications",
+        "path": "models/BASELINE/_model_remove:_None/TBI_WMH_BRATS_MSSEG_ATLAS/2025-06-12_15-01/WMH_PRELIM_TEST_random_drop_True_2025-06-12_15-01_Epoch_599.pth"
+    },
+    "setting_1_shuffle": {
+        "description": "Setting 1: Model with shuffled channel configuration",
+        "path": "models/WMH_PRELIM_TEST/_model_remove:_None/TBI_WMH_BRATS_MSSEG_ATLAS/2025-06-13_19-14/WMH_PRELIM_TEST_random_drop_True_2025-06-13_19-14_Epoch_599.pth"
+    },
+    "setting_1_agnostic_channel": {
+        "description": "Setting 1: Model with invariant channel configuration",
+        "path": "models/from_arc/_model_remove:_None/TBI_WMH_BRATS_MSSEG_ATLAS/2025-06-22_15-46/ARC_STUFF_random_drop_True_2025-06-22_15-46_Epoch_549.pth"
+    },
+    "setting_1_agnostic_path": {
+        "description": "Setting 1: Model with agnostic path configuration",
+        "path": "models/WMH_PRELIM_TEST/_model_remove:_None/TBI_WMH_BRATS_MSSEG_ATLAS/2025-06-16_23-33/WMH_PRELIM_TEST_random_drop_True_2025-06-16_23-33_Epoch_599.pth"
+    },
+    "setting_1_single_channel": {
+        "description": "Setting 1: Single channel model configuration",
+        "path": "models/WMH_PRELIM_TEST/_model_remove:_None/TBI_WMH_BRATS_MSSEG_ATLAS/2025-06-20_16-54/WMH_PRELIM_TEST_random_drop_False_2025-06-20_16-54_Epoch_599.pth"
+    },
+    "setting_2_standard": {
+        "description": "Setting 2: Baseline model without any special modifications",
+        "path": "models/BASELINE/TBI_ISLES2022_BRATS_MSSEG_ATLAS/2025-06-12_14-57/WMH_PRELIM_TEST_random_drop_True_2025-06-12_14-57_Epoch_599.pth"
+    },
+    "setting_2_shuffle": {
+        "description": "Setting 2: Model with shuffled channel configuration",
+        "path": "models/SHUFFLED/TBI_ISLES2022_BRATS_MSSEG_ATLAS/2025-06-17_12-21/WMH_PRELIM_TEST_random_drop_True_2025-06-17_12-21_Epoch_599.pth"
+    },
+    "setting_2_agnostic_channel": {
+        "description": "Setting 2: Model with invariant channel configuration",
+        "path": "models/from_arc/2025-06-22_14-49/ARC_STUFF_random_drop_True_2025-06-22_14-49_Epoch_549.pth"
+    },
+    "setting_2_agnostic_path": {
+        "description": "Setting 2: Model with agnostic path configuration",
+        "path": "models/WMH_PRELIM_TEST/_model_remove:_FLAIR/TBI_ISLES2022_BRATS_MSSEG_ATLAS/2025-06-17_12-20/WMH_PRELIM_TEST_random_drop_True_2025-06-17_12-20_Epoch_549.pth"
+    },
+    "setting_2_single_channel": {
+        "description": "Setting 2: Single channel model configuration",
+        "path": "models/WMH_PRELIM_TEST/_model_remove:_FLAIR/TBI_ISLES2022_BRATS_MSSEG_ATLAS/2025-06-20_15-14/WMH_PRELIM_TEST_random_drop_False_2025-06-20_16-54_Epoch_599.pth"
+    }
+}
+
+
+
+
