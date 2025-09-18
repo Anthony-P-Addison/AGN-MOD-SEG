@@ -1,5 +1,3 @@
-
-
 # Example preprocessing script (simplified)
 import nibabel as nib
 import numpy as np
@@ -10,15 +8,15 @@ from scipy import ndimage
 from typing import Optional
 
 
-
-
 def get_background_value(image_channel_3d, corner_size=5):
     """
     Calculate background value from the corners of a 3D numpy array.
     Assumes background is likely the median value in the corners.
     """
     if image_channel_3d.ndim != 3:
-        raise ValueError(f"Input must be a 3D array, but got shape {image_channel_3d.shape}")
+        raise ValueError(
+            f"Input must be a 3D array, but got shape {image_channel_3d.shape}"
+        )
 
     corners = [
         image_channel_3d[:corner_size, :corner_size, :corner_size],
@@ -33,17 +31,24 @@ def get_background_value(image_channel_3d, corner_size=5):
     # Filter out corners that might be empty if corner_size > dimension size
     valid_corners = [c.flatten() for c in corners if c.size > 0]
     if not valid_corners:
-        print("Warning: Could not sample corners (image might be too small). Using global minimum as background estimate.")
+        print(
+            "Warning: Could not sample corners (image might be too small). Using global minimum as background estimate."
+        )
         return np.min(image_channel_3d)
 
     background_samples = np.concatenate(valid_corners)
     if background_samples.size == 0:
-         print("Warning: No valid background samples found in corners. Using global minimum.")
-         return np.min(image_channel_3d)
+        print(
+            "Warning: No valid background samples found in corners. Using global minimum."
+        )
+        return np.min(image_channel_3d)
 
     return np.median(background_samples)
 
-def create_and_save_mask(img_file_path, output_mask_path, threshold_factor, corner_size):
+
+def create_and_save_mask(
+    img_file_path, output_mask_path, threshold_factor, corner_size
+):
     """
     Loads a NIfTI image, creates a mask based on the first modality,
     and saves the mask.
@@ -63,7 +68,9 @@ def create_and_save_mask(img_file_path, output_mask_path, threshold_factor, corn
             first_modality_3d = img_data
             print(f"  Image is 3D (shape {img_data.shape}), using as is.")
         else:
-            print(f"  Skipping {img_file_path}: Unsupported image dimension {img_data.ndim}.")
+            print(
+                f"  Skipping {img_file_path}: Unsupported image dimension {img_data.ndim}."
+            )
             return False
         # ---
 
@@ -78,9 +85,9 @@ def create_and_save_mask(img_file_path, output_mask_path, threshold_factor, corn
 
         # Label connected components in the thresholded mask (foreground)
         labeled_foreground, num_components = ndimage.label(mask_data_bool)
-        
-        final_mask_bool = np.zeros_like(mask_data_bool) # Initialize empty mask
-        
+
+        final_mask_bool = np.zeros_like(mask_data_bool)  # Initialize empty mask
+
         if num_components > 0:
             # Find the size of each foreground component (component 0 is background)
             component_sizes = np.bincount(labeled_foreground.ravel())
@@ -88,10 +95,10 @@ def create_and_save_mask(img_file_path, output_mask_path, threshold_factor, corn
             # Add check for component_sizes length in case only background exists (label 0)
             if len(component_sizes) > 1:
                 largest_component_label = component_sizes[1:].argmax() + 1
-                
+
                 # Create a mask containing only the largest component
-                largest_component_mask = (labeled_foreground == largest_component_label)
-                
+                largest_component_mask = labeled_foreground == largest_component_label
+
                 # Fill all holes within the largest component using SciPy's function
                 final_mask_bool = ndimage.binary_fill_holes(largest_component_mask)
             else:
@@ -101,7 +108,6 @@ def create_and_save_mask(img_file_path, output_mask_path, threshold_factor, corn
         else:
             print("  Warning: No components found by ndimage.label (check threshold?).")
             # final_mask_bool remains all zeros
-
 
         # Convert final boolean mask to uint8 for saving
         mask_data_uint8 = final_mask_bool.astype(np.uint8)
@@ -121,16 +127,15 @@ def create_and_save_mask(img_file_path, output_mask_path, threshold_factor, corn
         print(f"  Error processing {img_file_path}: {e}")
         return False
 
-def main(input_base_dir, output_base_dir, datasets, threshold_factor, corner_size, img_pattern):
-    # --- Configuration Section (EDIT THESE VALUES) ---
 
-    # input_base_dir = "data"  # Base directory containing dataset subfolders
-    # output_base_dir = "data" # Base directory where mask subfolders will be created
-    # datasets = ["TUMOUR2"]     # List of dataset subfolder names to process
-    # threshold_factor = 1                          # Factor to multiply median corner value by
-    # corner_size = 5                                   # Size of the cube edge to sample from corners
-    # img_pattern = "*.nii.gz"                          # Glob pattern for image files (e.g., '*.nii.gz', '*.nii*')
-    # --- End Configuration Section ---
+def main(
+    input_base_dir,
+    output_base_dir,
+    datasets,
+    threshold_factor,
+    corner_size,
+    img_pattern,
+):
 
     print(f"Starting mask generation...")
     print(f"Input Base Directory: {input_base_dir}")
@@ -144,8 +149,8 @@ def main(input_base_dir, output_base_dir, datasets, threshold_factor, corner_siz
     total_succeeded = 0
 
     for dataset_name in datasets:
-        input_dataset_dir = os.path.join(input_base_dir, dataset_name,'Images')
-        output_dataset_dir = os.path.join(output_base_dir, dataset_name, 'Masks')
+        input_dataset_dir = os.path.join(input_base_dir, dataset_name, "Images")
+        output_dataset_dir = os.path.join(output_base_dir, dataset_name, "Masks")
 
         print(f"\nProcessing Dataset: {dataset_name}")
         print(f"Input folder: {input_dataset_dir}")
@@ -159,7 +164,9 @@ def main(input_base_dir, output_base_dir, datasets, threshold_factor, corner_siz
         image_files = sorted(glob(os.path.join(input_dataset_dir, img_pattern)))
 
         if not image_files:
-            print(f"Warning: No images found matching pattern '{img_pattern}' in {input_dataset_dir}. Skipping.")
+            print(
+                f"Warning: No images found matching pattern '{img_pattern}' in {input_dataset_dir}. Skipping."
+            )
             continue
 
         print(f"Found {len(image_files)} images.")
@@ -171,23 +178,28 @@ def main(input_base_dir, output_base_dir, datasets, threshold_factor, corner_siz
             dataset_processed += 1
 
             # Construct output filename
-            img_filename_stem = Path(img_path).stem.split('.')[0] # Get name before first dot (handles .nii and .nii.gz)
-            mask_filename = f"{img_filename_stem}_mask.nii.gz" # Always save as .nii.gz
+            img_filename_stem = Path(img_path).stem.split(".")[
+                0
+            ]  # Get name before first dot (handles .nii and .nii.gz)
+            mask_filename = f"{img_filename_stem}_mask.nii.gz"  # Always save as .nii.gz
             output_path = os.path.join(output_dataset_dir, mask_filename)
 
-            if create_and_save_mask(img_path, output_path, threshold_factor, corner_size):
+            if create_and_save_mask(
+                img_path, output_path, threshold_factor, corner_size
+            ):
                 dataset_succeeded += 1
 
-        print(f"Finished dataset {dataset_name}: {dataset_succeeded}/{dataset_processed} masks generated successfully.")
+        print(
+            f"Finished dataset {dataset_name}: {dataset_succeeded}/{dataset_processed} masks generated successfully."
+        )
         total_processed += dataset_processed
         total_succeeded += dataset_succeeded
 
     print("-" * 30)
-    print(f"Overall Summary: {total_succeeded}/{total_processed} masks generated successfully across all datasets.")
+    print(
+        f"Overall Summary: {total_succeeded}/{total_processed} masks generated successfully across all datasets."
+    )
     print("Mask generation complete.")
-
-
-
 
 
 if __name__ == "__main__":

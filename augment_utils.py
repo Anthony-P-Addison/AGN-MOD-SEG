@@ -5,7 +5,9 @@ import matplotlib.pyplot as plt
 import scipy.ndimage as ndimage
 from config import Augmentation_config
 
-##### any defintions for augmentations go here ######
+
+
+##### any defintions for augmentations to inputs to agnotic channel  go here, ADD AS NEEDED ######
 
 
 def spatial_contrast_aug(
@@ -54,7 +56,7 @@ def spatial_contrast_aug(
     tumor_factor_intensity = None
 
     # Create a working copy that only contains the brain region initially
-    # working_img = torch.where(brain_mask_bool, img, img) # Start with original brain + background
+    # Start with original brain + background
     working_img = img.clone()
     working_pathology_img = img.clone()
 
@@ -157,48 +159,24 @@ def spatial_contrast_aug(
                 dilation_iterations,
                 img,
             )
-
-            # tumor_mask_np = tumor_mask_bool[0].cpu().numpy()
-            # brain_mask_np = brain_mask_bool[0].cpu().numpy()
-
-            # dilated_tumor = ndimage.binary_dilation(
-            #     tumor_mask_np,
-            #     iterations=dilation_iterations,
-            #     border_value=0
-            # )
-
-            # eroded_tumor_np = ndimage.binary_erosion(
-            #     tumor_mask_np,
-            #     iterations=dilation_iterations,
-            #     border_value=0
-            # )
-
-            # outer_boundary_component_np = dilated_tumor & ~tumor_mask_np
-            # inner_boundary_component_np = tumor_mask_np & ~eroded_tumor_np
-
-            # boundary_np = (outer_boundary_component_np | inner_boundary_component_np) & brain_mask_np
-
-            # if np.any(boundary_np):
-            #     boundary_tensor = torch.from_numpy(boundary_np).to(device=img.device)
-            #     sigma = np.random.uniform(*blur_sigma_range)
-
-            #     for c in range(working_img.shape[0]):
-            #         channel_data_np = working_img[c].cpu().numpy()
-            #         blurred_channel_np = ndimage.gaussian_filter(channel_data_np, sigma=sigma)
-            #         blurred_channel_tensor = torch.from_numpy(blurred_channel_np).to(device=img.device)
-
-            #         working_img[c] = torch.where(
-            #             boundary_tensor,
-            #             blurred_channel_tensor,
-            #             working_img[c]
-            #         )
-
     # --- Final Image Assignment and Normalization ---
     augmented_img = working_img
 
     if plot_image:
         # --- Visualization ---
-        plot_augmentation(img, tumor_mask_bool, brain_mask_bool, augmented_img,brain_factor_multiply,brain_factor_intensity,tumor_factor_multiply,tumor_factor_intensity,brain_inversion,tumor_inversion,tumor_channel)
+        plot_augmentation(
+            img,
+            tumor_mask_bool,
+            brain_mask_bool,
+            augmented_img,
+            brain_factor_multiply,
+            brain_factor_intensity,
+            tumor_factor_multiply,
+            tumor_factor_intensity,
+            brain_inversion,
+            tumor_inversion,
+            tumor_channel,
+        )
 
     return augmented_img
 
@@ -208,13 +186,6 @@ def plot_augmentation(
     tumor_mask_bool,
     brain_mask_bool,
     augmented_img,
-    brain_factor_multiply,
-    brain_factor_intensity,
-    tumor_factor_multiply,
-    tumor_factor_intensity,
-    brain_inversion,
-    tumor_inversion,
-    tumor_channel,
 ):
     """
     Plot the augmentation parameters and the augmented image.
@@ -259,19 +230,19 @@ def plot_augmentation(
         plt.title("Augmented Image")
         plt.axis("off")
 
-        # Add overall title with augmentation parameters
-        # plt.suptitle(
-        #     f"Augmentation Parameters:\nBrain scale: {brain_factor_multiply:.2f}, shift: {brain_factor_intensity:.2f}\nTumor scale: {tumor_factor_multiply:.2f},shift: {tumor_factor_intensity:.2f}\nBrain inversion: {brain_inversion},Tumor inversion: {tumor_inversion}\nTumour_swap: {tumor_channel}",
-        #     y=1.05,
-        # )
-
         # Save only, don't show
         plt.tight_layout()
         plt.savefig("spatial_contrast_aug.png", bbox_inches="tight", dpi=300)
         plt.close()
 
 
-def MixUp(x:torch.tensor, working_image:torch.tensor,channel_add:int,mask:torch.tensor,lam_params:tuple = (0.7,1)):
+def MixUp(
+    x: torch.tensor,
+    working_image: torch.tensor,
+    channel_add: int,
+    mask: torch.tensor,
+    lam_params: tuple = (0.7, 1),
+):
     """
     Apply mixup contrast augmentation to the input tensor x.
     Args:
@@ -279,14 +250,13 @@ def MixUp(x:torch.tensor, working_image:torch.tensor,channel_add:int,mask:torch.
     Returns:
         mixed_x: torch.tensor, shape (batch_size, 1,height, width)
     """
-    possible_channels = [i for i in range(x.shape[0]-1) if i not in channel_add ]
+    possible_channels = [i for i in range(x.shape[0] - 1) if i not in channel_add]
     mix = random.choice(possible_channels)
     mix_image = x[mix]
-    lam = np.random.uniform(lam_params[0],lam_params[1])
-    mixed_x = torch.mul(working_image[0],lam)+ torch.mul(mix_image,(1-lam))
-    mixed_x =torch.where(mask,mixed_x,working_image) 
+    lam = np.random.uniform(lam_params[0], lam_params[1])
+    mixed_x = torch.mul(working_image[0], lam) + torch.mul(mix_image, (1 - lam))
+    mixed_x = torch.where(mask, mixed_x, working_image)
     return mixed_x
-
 
 
 def lesion_blur(
