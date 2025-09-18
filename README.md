@@ -1,6 +1,6 @@
 # MultiUnet: Multi-Modal Medical Image Segmentation
 
-![MultiUnet Architecture](diagrams/Diagram%20-%20Page%201.png)
+![MultiUnet Architecture](diagrams/Input_Architecture.png)
 
 A deep learning framework for medical image segmentation that supports multiple imaging modalities and various medical datasets.
 
