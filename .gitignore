@@ -148,3 +148,4 @@ cython_debug/
 *.wandb
 *.csv
 *.html
+*.png

@@ -1,4 +1,4 @@
-name: multiunet
+name: agn_mod_seg
 channels:
   - anaconda
   - pytorch
