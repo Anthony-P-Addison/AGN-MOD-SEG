@@ -52,7 +52,7 @@ class TrainImageMaskDataset(ImageDataset):
         # channels_to_remove is not directly used if RemoveChannels is in initial `transform`
         init_crop_size=None,  # Pass cropped_input_size here
         dict_aug_prob=0.1,
-    ):  # Probability for RandRotate90d, example
+    ):  
 
         # Store file lists (mainly for mask loading)
         self.image_files = image_files

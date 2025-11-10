@@ -37,7 +37,7 @@ class Trainer:
         self.randomly_drop = bool(self.train_config.random_drop)
         self.single_slot = self.train_config.single_slot
         self.wandb_active = self.train_config.wandb_active
-        self.contrast_augmentation = self.train_config.contrast_augmentation
+        self.agnostic_chan_augs = self.train_config.agnostic_chan_augs
         self.lr_sched = self.train_config.lr_sched
         self.held_out_datasets = self.train_config.held_out_datasets
         self.dropped_modality = self.train_config.modality_remove
@@ -260,7 +260,7 @@ class Trainer:
                 self.channels[dataset], batch[self.img_index],
                 mask_data=batch[self.mask_index], domain_invariant=self.domain_invariant_slot,
                 batch_label_data=batch[self.label_index], device_id=self.args.device_id,
-                contrast_augmentation=self.contrast_augmentation, combination_map=self.combination_map[dataset],
+                agnostic_chan_augs=self.agnostic_chan_augs, combination_map=self.combination_map[dataset],
                 augmentation_config=self.aug_config
             )
             if dataset == "BRATS" and self.database_config.BRATS_two_channel_seg:

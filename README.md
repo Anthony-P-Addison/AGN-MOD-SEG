@@ -41,9 +41,9 @@ MultiUnet/
 ├── train_finetune.py  # Fine-tuning script
 ├── k_fold.py          # K-fold cross-validation implementation
 ├── masking.py         # Mask generation utilities for datasets. 
-├── 
-├──
-├──
+├── test.py            # Main test script
+├── utils.py           # additional functions 
+├── nets.py 
 ├──      
 └── data/              # Dataset directory
     ├── BRATS/
@@ -66,14 +66,50 @@ The pipeline is set up to be trained on one or more datasets of 3D medical image
    │   └── Labels/
    ```
 
+2. Create brain masks to allow application of tissue specific augmentations. Corresoponsing masks will be located in the same directoy as the corresponding images and labels. 
+   
+   ```bash
+   python masking.py --datasets "DATASET1"
+   ```
+
+   Saved to mask folder as follows:
+
+   ```bash
+   data/
+   ├── DATASET_NAME/
+   │   ├── Images/
+   │   ├── Labels/
+   │   └── Masks/
+   ```
+
+
 2. Configure settings:
    - Adjust parameters in `config.py` according to your needs
+      - add your own databses in the config file under the database config EXAMPLE BRATS: 
+         ```bash
+         channels["BRATS"] = ["FLAIR", "T1", "T1c", "T2"]
+         ...
+         train_size["BRATS"] = 444 
+         ...
+         total_size["BRATS"] = 484
+         ...
+         img_path["BRATS"] = "data/BRATS/Images"
+         ...
+         seg_path["BRATS"] = "data/BRATS/Labels"
+         ...
+         val_size["BRATS"] = 40 
+         ...
+         mask_path["BRATS"] = "data/BRATS/Masks"
+
+         ```
+
+      
    - Set up your wandb project if using experiment tracking
 
 
 ## Quick Use
 
-Use pre trained model for inference on data with unseen modality assigned to invariant chanenl: 
+Use pre trained model for inference on data with unseen modality assigned to agnostic channel: 
 
 
 
@@ -111,17 +147,17 @@ The following baselines can be trained/tested and adapted as fit:
 
 1. Run training:
 ```bash
-   python train_2.py --datasets "DATASET1,DATASET2" [additional arguments]
+   python train_2.py --device_id 0 --datasets "DATASET1_DATASET2" --modality_remove None
    ```
 
 2. Finetuning:
 ```bash
-   python train_2.py --datasets "DATASET1,DATASET2" [additional arguments]
+   python train_2.py --device_id 0 --datasets "DATASET1_DATASET2" --load_model_finetune_path ..
    ```
 
 3. For k-fold cross-validation:
 ```bash
-   python train_2.py --datasets "DATASET1" --k_fold N
+   python k_fold.py --device_id 0 --datasets "DATASET1_DATASET2" --k_fold 5 
    ```
 
 ## Inference 
@@ -139,12 +175,6 @@ The following baselines can be trained/tested and adapted as fit:
    python test.py --datasets  --k_fold N
 
    ```
-
-
-
-
-
-## TODO
 
 
 **Citation**  

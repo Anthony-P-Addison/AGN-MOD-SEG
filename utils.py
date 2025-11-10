@@ -86,8 +86,8 @@ def rand_set_channels_to_zero_with_invar(
     dataset_modalities: list,
     batch_img_data: torch.Tensor,
     mask_data: torch.Tensor,
-    domain_invariant: bool,
-    contrast_augmentation: bool = False,
+    agnostic_channel: bool,
+    agnostic_chan_augs: bool = False,
     batch_label_data: torch.Tensor = None,
     device_id: str = None,
     combination_map: list = None,
@@ -102,7 +102,7 @@ def rand_set_channels_to_zero_with_invar(
     # Working copy for modifications
     working_batch = batch_img_data.clone()
 
-    if domain_invariant:
+    if agnostic_channel:
         # append invariant channel
         working_batch = torch.cat((working_batch, torch.zeros((working_batch.shape[0], 1, working_batch.shape[2], working_batch.shape[3], working_batch.shape[4]))),dim=1)
         original_batch = torch.cat((original_batch, torch.zeros((original_batch.shape[0], 1, original_batch.shape[2], original_batch.shape[3], original_batch.shape[4]))),dim=1)
@@ -122,10 +122,10 @@ def rand_set_channels_to_zero_with_invar(
                 working_batch[i,mod,:,:,:] = 0  # Force zero if not already zero
         
         # Handle aggnostic channel with augmentations
-        if domain_invariant and len(dataset_modalities) > 2:
+        if agnostic_channel and len(dataset_modalities) > 2:
             invar = None
           
-            if contrast_augmentation:
+            if agnostic_chan_augs:
                 random_number = random.random()
                 
                 # number below is probability of not using augmentations
@@ -162,7 +162,7 @@ def rand_set_channels_to_zero_with_invar(
                 else:
 
                     channel_add = random.sample(modalities_remaining, 1)
-                    if contrast_augmentation:
+                    if agnostic_chan_augs:
                         pathology_label = batch_label_data[i,0,:,:,:]
                         brain_mask = mask_data[i,0,:,:,:] 
                         invar = spatial_contrast_aug(augmentation_config,channel_add,pathology_label,brain_mask,original_batch[i,:,:,:])

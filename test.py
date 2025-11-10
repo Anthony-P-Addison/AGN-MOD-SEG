@@ -49,7 +49,7 @@ class ModelTester:
     def setup_modalities(self):
         self.channels_copy = copy.deepcopy(self.database_config.channels)
         for data in self.datasetlist:
-            if self.test_config.domain_invariant_slot:
+            if self.test_config.agnostic_path:
                 if self.test_config.modality_rem_train is None:
                     self.database_config.channels[data].append("invar")
                 elif self.test_config.modality_rem_train is not None:
@@ -59,7 +59,7 @@ class ModelTester:
             if  self.test_config.modality_remove is not None:
                 self.database_config.channels[data] = [modality for modality in self.database_config.channels[data] if modality not in self.test_config.modality_remove]
 
-            if self.test_config.domain_invariant_slot:
+            if self.test_config.agnostic_path:
                 self.total_modalities.add("invar")
             
             self.total_modalities = self.total_modalities.union(set(self.database_config.channels[data]))
@@ -111,7 +111,7 @@ class ModelTester:
             if self.test_config.single_slot:
                 model = Unet_deep(in_channels=1,out_channels=1,invariant_channel=False).to(self.device)
             else:
-                model = Unet_deep(in_channels=len(self.total_modalities), out_channels=1,invariant_channel=self.test_config.invariant_layers).to(self.device)
+                model = Unet_deep(in_channels=len(self.total_modalities), out_channels=1,invariant_channel=self.test_config.agnostic_path).to(self.device)
 
         elif self.test_config.model_net_type == "unet_old":
             if self.test_config.single_slot:
@@ -222,7 +222,7 @@ class ModelTester:
             self.mean_dice_comb.append([modality_list, (np.round(metric[dataset]["dice"], 4))])
 
     def run(self):
-        print(f"Random assign: {self.rand_assign}\n Domain invariant slot: {self.test_config.domain_invariant_slot}\n modality removed during training: {self.test_config.modality_remove}")
+        print(f"Random assign: {self.rand_assign}\n Domain invariant slot: {self.test_config.agnostic_path}\n modality removed during training: {self.test_config.modality_remove}")
         print("Total modalities: ", self.total_modalities)
 
         dataset = self.args.datasets_to_test
@@ -365,7 +365,7 @@ if __name__ == "__main__":
     args.datasets_to_test = 'ISLES'
     args.modalities_to_test = "0_1_2" #ic order of modalities
     args.test_all_combinations = 0
-    args.device_id = 0
+    args.device_id = 1
     args.trained_on = "TBI_WMH_BRATS_MSSEG_ATLAS" #DATASETS the model was trained on
     args.checkpoint = 'models/WMH_PRELIM_TEST/_model_remove:_None/TBI_WMH_BRATS_MSSEG_ATLAS/2025-06-13_19-14/WMH_PRELIM_TEST_random_drop_True_2025-06-13_19-14_Epoch_599.pth' #'models/BASELINE/models_run2/models/WMH_PRELIM_TEST/_model_remove:_FLAIR/TBI_ISLES2022_BRATS_MSSEG_ATLAS/2025-06-17_12-20/WMH_PRELIM_TEST_random_drop_True_2025-06-17_12-20_Epoch_549.pth' #'models/Agnostic_channel/_model_remove:_FLAIR/ISLES2022_MSSEG_BRATS_TBI_ATLAS/2025-09-03_12-27/Agnostic_channel_random_drop_True_2025-09-03_12-27_Epoch_599.pth'        # None if using the pre defined checkpoints in checkpoint_paths.json and model name for own models.
     args.model_name = 'own_checkpoint'   # only applicable is checkpoint is None 

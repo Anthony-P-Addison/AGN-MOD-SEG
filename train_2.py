@@ -27,13 +27,14 @@ def main(train_config,aug_config,database_config,k_fold,args,channels_copy):
     # load config
 
     rand_assign_channels = train_config.rand_assign_channels
-    domain_invariant_slot = train_config.domain_invariant_slot
+    agnostic_channel = train_config.agnostic_channel
+    agnostic_path = train_config.agnostic_path
     load_model_path = train_config.load_model_path
     modality_remove =  train_config.modality_remove
     randomly_drop = bool(train_config.random_drop)
     single_slot = train_config.single_slot
     wandb_active = train_config.wandb_active
-    contrast_augmentation = train_config.contrast_augmentation
+    agnostic_chan_augs = train_config.agnostic_chan_augs
     lr_sched = train_config.lr_sched
     held_out_datasets = train_config.held_out_datasets
     dropped_modality = train_config.modality_remove
@@ -81,10 +82,11 @@ def main(train_config,aug_config,database_config,k_fold,args,channels_copy):
     print("RANDOM DROP: ", randomly_drop)
 
     print("\n #######  Training_methods #######")
-    print("Domain Invariant Slot: ", domain_invariant_slot)
+    print("Agnostic Channel: ", agnostic_channel)
+    print("Agnostic Path: ", agnostic_path)
     print("Training with single input channel/slot: ", single_slot)
     print("Randomly assign channels: ", rand_assign_channels)
-    print("Modality to remove: ", modality_remove, "\n")
+    print("Modality to remove from training datasets: ", modality_remove, "\n")
 
     if k_fold:
         print(f"Training split___: {k_fold}")
@@ -112,7 +114,7 @@ def main(train_config,aug_config,database_config,k_fold,args,channels_copy):
     data_size = 0
     for dataset in datasetlist:
 
-        if domain_invariant_slot == True:
+        if agnostic_channel == True:
             channels[dataset].append("invar")
 
         if k_fold is not None:
@@ -183,7 +185,7 @@ def main(train_config,aug_config,database_config,k_fold,args,channels_copy):
 
     elif train_config.model_type == "AGNOSTIC_NET":
         print("TRAINING WITH AGNOSTIC NET")
-        model = unet_deep(in_channels=in_channel,invariant_channel= train_config.domain_invariant_layers).to(device)
+        model = unet_deep(in_channels=in_channel,agnostic_path= train_config.agnostic_path).to(device)
 
 
 
@@ -233,7 +235,7 @@ def main(train_config,aug_config,database_config,k_fold,args,channels_copy):
         )
 
     combination_map = {}
-    if domain_invariant_slot == True:
+    if agnostic_channel == True:
         #loop for allocating combination of modalities for each dataset
         for dataset in datasetlist:
             combination_map[dataset] = utils.map_combinations(
@@ -285,7 +287,7 @@ def main(train_config,aug_config,database_config,k_fold,args,channels_copy):
                     if randomly_drop:
                         modalities_dropped,modalities_remaining, batch[img_index] = (
                             utils.rand_set_channels_to_zero_with_invar(
-                                channels["BRATS"], batch[img_index],mask_data = batch[mask_index],domain_invariant=domain_invariant_slot, batch_label_data=batch[label_index],device_id = args.device_id,contrast_augmentation=contrast_augmentation,combination_map=combination_map["BRATS"],augmentation_config=aug_config
+                                channels["BRATS"], batch[img_index],mask_data = batch[mask_index],agnostic_channel=agnostic_channel, batch_label_data=batch[label_index],device_id = args.device_id,agnostic_chan_augs=agnostic_chan_augs,combination_map=combination_map["BRATS"],augmentation_config=aug_config
                             )
                         )
                         for i in range(batch[label_index].shape[0]):
@@ -361,7 +363,7 @@ def main(train_config,aug_config,database_config,k_fold,args,channels_copy):
                         if randomly_drop:
                             modalities_dropped,modalities_remaining, batch[img_index] = (
                                 utils.rand_set_channels_to_zero_with_invar(
-                                    channels["TBI"], batch[img_index],mask_data = batch[mask_index],domain_invariant=domain_invariant_slot, batch_label_data=batch[label_index], device_id= args.device_id,contrast_augmentation=contrast_augmentation,combination_map=combination_map["TBI"],augmentation_config=aug_config
+                                    channels["TBI"], batch[img_index],mask_data = batch[mask_index],agnostic_channel =agnostic_channel, batch_label_data=batch[label_index], device_id= args.device_id,agnostic_chan_augs=agnostic_chan_augs,combination_map=combination_map["TBI"],augmentation_config=aug_config
                                 )
                         )
                         # this part is only relevant for TBI when doing multi channel segmentation with modality drop 
@@ -445,7 +447,7 @@ def main(train_config,aug_config,database_config,k_fold,args,channels_copy):
                     else:
                         if randomly_drop:
                             modalities_dropped, modalities_remaining, batch[img_index] = utils.rand_set_channels_to_zero_with_invar(
-                                channels[dataset], batch[img_index],mask_data = batch[mask_index],domain_invariant=domain_invariant_slot, batch_label_data = batch[label_index],device_id =args.device_id,contrast_augmentation=contrast_augmentation,combination_map=combination_map[dataset],augmentation_config=aug_config
+                                channels[dataset], batch[img_index],mask_data = batch[mask_index],agnostic_channel =agnostic_channel, batch_label_data = batch[label_index],device_id =args.device_id,agnostic_chan_augs=agnostic_chan_augs,combination_map=combination_map[dataset],augmentation_config=aug_config
                             )  # ATLAS WILL ALWAYS BE ONE CHANNEL (no drop)
                         
                         input_data = torch.from_numpy(
@@ -596,7 +598,7 @@ def main(train_config,aug_config,database_config,k_fold,args,channels_copy):
                                     dtype=np.float32,
                                 )
                             )
-                            if domain_invariant_slot == True:
+                            if agnostic_channel == True:
                                 if dataset in held_out_datasets:
                                     input_data[:, channel_map[dataset], :, :, :] = val_data[0]
                                 elif dataset in datasetlist:

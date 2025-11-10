@@ -30,8 +30,8 @@ def main(args,k_fold: None):
     train_config=config.Finetune_config()
     randomly_drop = bool(args.randomly_drop)
     Database_config=config.Database_config()
-    add_invar_channel_to_pre_trained_model= train_config.add_invar_channel_to_pre_trained_model
-    add_invar_layers_to_pre_trained_model= train_config.add_invar_layers_to_pre_trained_model
+    add_agnostic_channel_to_pre_trained_model= train_config.add_agnostic_channel_to_pre_trained_model
+    add_agnostic_path_to_pre_trained_model= train_config.add_agnostic_path_to_pre_trained_model
     cropped_input_size = train_config.cropped_input_size
    
     datasets_trained_initially=args.datasets_trained_initially.split("_")
@@ -60,6 +60,8 @@ def main(args,k_fold: None):
     print("Batch size: ",train_config.train_batch_size)
     print("RANDOMLY DROP? ",randomly_drop)
     print(f"THe model trained on {datasets_trained_initially} to be fine tuned on {finetune_dataset}")
+
+    channel2 = Database_config.channels
 
     if modality_remove !=  None:  
         # from channels remove one modality for all datasets in question
@@ -114,7 +116,7 @@ def main(args,k_fold: None):
     print("Data_size", data_size)
 
     
-    if add_invar_channel_to_pre_trained_model or train_config.new_mod_finetune:
+    if add_agnostic_channel_to_pre_trained_model or train_config.new_mod_finetune:
         total_modalities.append(train_config.new_mod_finetune)                  
 
 
@@ -132,8 +134,7 @@ def main(args,k_fold: None):
     val_loader={}
  
     # get dataloader
-    train_config.modality_remove = None
-    train_loaders, val_loader,data_loader_map = get_dataloader(train_config, Database_config, [dataset], cropped_input_size, data_size,channels,k_fold=k_fold,dataset_use="Train")
+    train_loaders, val_loader,data_loader_map = get_dataloader(train_config, Database_config, [dataset], cropped_input_size, data_size,channel2,k_fold=k_fold,dataset_use="Train")
 
 
 
@@ -158,7 +159,7 @@ def main(args,k_fold: None):
         epoched = 0
         print("LOADING MODEL: ", args.load_model_finetune_path)
         # add slot to the pre-trained model to finetune unseen modality.
-        if add_invar_channel_to_pre_trained_model:
+        if add_agnostic_channel_to_pre_trained_model:
 
             invariant_channel  = False
             load = torch.load(
@@ -167,7 +168,7 @@ def main(args,k_fold: None):
             )
             checkpoint = utils.add_invar_input_to_pre_trained(load)
 
-        elif add_invar_layers_to_pre_trained_model:
+        elif add_agnostic_path_to_pre_trained_model:
             invariant_channel = True
             load = torch.load(
                 args.load_model_finetune_path,
@@ -245,8 +246,8 @@ def main(args,k_fold: None):
                     input_data = torch.from_numpy(np.zeros((batch[img_index].shape[0],len(total_modalities),cropped_input_size[0],cropped_input_size[1],cropped_input_size[2]),dtype=np.float32))
                     
                     # When using invariant layers, handle FLAIR separately
-                    modality = None
-                    if add_invar_layers_to_pre_trained_model and modality in channels[dataset]:
+                    # modality = None
+                    if add_agnostic_path_to_pre_trained_model and modality in channels[dataset]:
                         # Find FLAIR index in the dataset channels
                         flair_idx = channels[dataset].index(modality)
                         
@@ -281,14 +282,14 @@ def main(args,k_fold: None):
                          #_, batch[img_index]
                         
                         all_modalities_dropped, all_modalities_remaining, batch[img_index] = utils.rand_set_channels_to_zero_with_invar(
-                            channels[dataset], batch[img_index],mask_data=batch[mask_index],domain_invariant=False,combination_map = combination_map[dataset]
+                            channels[dataset], batch[img_index],mask_data=batch[mask_index],agnostic_channel=False,combination_map = combination_map[dataset],
                             )  # ATLAS WILL ALWAYS BE ONE CHANNEL (no drop) 
 
                     input_data = torch.from_numpy(np.zeros((batch[img_index].shape[0],len(total_modalities),cropped_input_size[0],cropped_input_size[1],cropped_input_size[2]),dtype=np.float32))
                     
                     # When using invariant layers, handle FLAIR separately
                     modality = None
-                    if add_invar_layers_to_pre_trained_model and modality in channels[dataset]:
+                    if add_agnostic_path_to_pre_trained_model and modality in channels[dataset]:
                         # Find FLAIR index in the dataset channels
                         flair_idx = channels[dataset].index(modality)
                         
@@ -385,7 +386,7 @@ def main(args,k_fold: None):
                         
                         # When using invariant layers, handle FLAIR separately in validation too
                         modality = None
-                        if add_invar_layers_to_pre_trained_model and modality in channels[dataset]:
+                        if add_agnostic_path_to_pre_trained_model and modality in channels[dataset]:
                             # Find FLAIR index in the dataset channels
                             flair_idx = channels[dataset].index(modality)
                             
@@ -471,17 +472,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--device_id", help="ID of the GPU", type=int, default=0)
     parser.add_argument("--datasets", help="datasets for training, using '_' to separate", type=str)
-    #parser.add_argument("--save_name", help="File name for saving model weights and checkpoints", type=str, default='save')
     parser.add_argument("--randomly_drop", help="0 or 1, 1 if random dropping modalities when training", type=int, default='1')
     parser.add_argument("--load_model_finetune_path", help="The path of the pretrained model", type=str)
-    parser.add_argument("--manual_channel_map", help="The allocated channel index of the modalities(each channel) in the finetuning input (start from 0)     Using '_' to separate.  For example, 1_3 means the first modality in the finetuning input goes to the second channel of the model, and the second modality goes to the fourth channel of the model.", type=str)
     parser.add_argument("--datasets_trained_initially", help="modalities used for training the pre-train model using '_' to separate", type=str)
     args = parser.parse_args()
 
     args.device_id = 0
     args.datasets = "WMH"
     args.randomly_drop = 1
-    args.load_model_finetune_path = 'models/UPPER_BOUND_FINETUNE/2025-07-03_15-19/WMH_PRELIM_TEST_random_drop_True_2025-07-03_15-19_Epoch_599.pth'
+    args.load_model_finetune_path = 'Models_2/Models_from_paper/SETTING_2/set_2_standard_model/WMH_PRELIM_TEST_random_drop_True_2025-06-12_14-57_Epoch_599.pth'
     args.datasets_trained_initially = 'TBI_ISLES2022_BRATS_MSSEG_ATLAS'  
 
     

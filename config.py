@@ -33,15 +33,15 @@ class Training_config():
     project_name:str = "Agnostic_channel"   # wandb project name
     model_save_path:str = "models/" + project_name + "/_model_remove:_" + str(modality_remove) + "/" # path to save the model
     ### Layers in model specific to domain invariant slot ###
-    domain_invariant_layers:bool = True
-    domain_invariant_slot:bool = True
-    contrast_augmentation: bool = True
+    agnostic_path:bool = True
+    agnostic_channel:bool = True
+    agnostic_chan_augs: bool = True
     ##### Baselines #####
     rand_assign_channels:bool = False
     single_slot:bool = False  
     
     ### HELD OUT DATASET WANT TO VALIDATE AS TRAIN WITH OR WITHOUT UNSEEN MODALITY ####
-    held_out_datasets:list = ['WMH']  # datasets want to use for validation but not for training
+    held_out_datasets:list = [] # datasets want to use for validation but not for training
 
 
 class Database_config():
@@ -156,10 +156,10 @@ class Test_config():
     
     # Slot 
     rand_assign:bool = True # True to randomly assign the channels to the model
-    domain_invariant_slot:bool =  False
+    agnostic_channel:bool =  False
     single_slot:bool = False
     modality_remove = 'DWI' #Can be: str, list, or None. Modalities to be completely removed during test in dataloader. 
-    invariant_layers:bool = False
+    agnostic_path:bool = False
     modality_rem_train: str = None # the modality that was removed during training and now want to test in the invariant slot.
 
 
@@ -178,38 +178,38 @@ class Finetune_config:
     drop_learning_rate_value:float = 5e-6   # can lower this for finetuning
    
     # model_save_path
-    modality_remove:str = 'FLAIR'  # the modality to be removed (useful for testing invariant slot on this modality). None if no modality to be dropped
+    modality_remove:str = "FLAIR" # modality to be removed (useful for testing invariant slot on this modality). None if no modality to be dropped
     project_name:str = "VOETS2_study"   # wandb project name:   # all_in_one   # shuffle_slots  # modality_invariant_slot
     model_save_path:str = "models/" + project_name + "/" # path to save the model
     wandb_report:bool = True
 
     # add new modality to invar channel, trained from previous model
     new_mod_finetune:str = None  # modality to be added to the invar channel for finetuning
-    modality_remove_training_set: str = None  # the modality to be removed from the training set of pre trained model. None if no modality to be dropped, 
+    modality_remove_training_set: str ="FLAIR" # modality to be removed from the training set of pre trained model. None if no modality to be dropped, 
    
 
     # add invar channel, train from scratch
-    add_invar_channel_to_pre_trained_model:bool = False
-    add_invar_layers_to_pre_trained_model:bool = False
+    add_agnostic_channel_to_pre_trained_model:bool = False
+    add_agnostic_path_to_pre_trained_model:bool = False
 
-    invariant_layers:bool = False
+    agnostic_path:bool = False
 
 
 
 
 class Augmentation_config:
     ##### Brain Tissue Augmentations #####
-    prob_brain_invert: float = 0 #0.5 
-    prob_brain_mixup: float = 0 #0.5
-    prob_brain_scale_shift: bool = False
+    prob_brain_invert: float = 0.5 
+    prob_brain_mixup: float = 0.5 
+    prob_brain_scale_shift: bool = True
 
     brain_factor_multiply: tuple = (0.8, 1.2)
     brain_factor_intensity: tuple = (-0.2, 0.2)
 
     ##### Pathology Tissue Augmentations #####
-    prob_lesion_switch: float = 0 #0.75 
-    prob_pathology_invert: float = 0 #0.5  
-    prob_pathology_mixup: float = 0 #0.5 
+    prob_lesion_switch: float = 0.75 
+    prob_pathology_invert: float = 0.5 
+    prob_pathology_mixup: float = 0.5 
     prob_tumor_scale_shift: bool = False
 
     tumor_factor_multiply: tuple = (0.8, 1.2)

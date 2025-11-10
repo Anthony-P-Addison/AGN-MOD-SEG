@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from scipy import ndimage
 from typing import Optional
+import argparse
 
 
 def get_background_value(image_channel_3d, corner_size=5):
@@ -148,6 +149,9 @@ def main(
     total_processed = 0
     total_succeeded = 0
 
+    if isinstance(datasets, str):
+        datasets = [datasets]
+
     for dataset_name in datasets:
         input_dataset_dir = os.path.join(input_base_dir, dataset_name, "Images")
         output_dataset_dir = os.path.join(output_base_dir, dataset_name, "Masks")
@@ -192,23 +196,27 @@ def main(
         print(
             f"Finished dataset {dataset_name}: {dataset_succeeded}/{dataset_processed} masks generated successfully."
         )
-        total_processed += dataset_processed
-        total_succeeded += dataset_succeeded
+        total_processed += dataset_processed 
 
-    print("-" * 30)
-    print(
-        f"Overall Summary: {total_succeeded}/{total_processed} masks generated successfully across all datasets."
-    )
-    print("Mask generation complete.")
+
 
 
 if __name__ == "__main__":
+
     # --- Configuration Section (EDIT THESE VALUES) ---
-    input_base_dir = "data"  # Base directory containing dataset subfolders
-    output_base_dir = "data" # Base directory where mask subfolders will be created
-    datasets = ["VESTIBS"]     # List of dataset subfolder names to process
+ 
     threshold_factor = 1                          # Factor to multiply median corner value by
     corner_size = 5                                   # Size of the cube edge to sample from corners
     img_pattern = "*.nii.gz"                          # Glob pattern for image files (e.g., '*.nii.gz', '*.nii*')
     # --- End Configuration Section ---
-    main(input_base_dir, output_base_dir, datasets, threshold_factor, corner_size, img_pattern)
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input_base_dir", help="Input base directory", type=str, default="data")
+    parser.add_argument("--output_base_dir", help="Output base directory", type=str, default="data")
+    parser.add_argument("--datasets", help="Datasets to process", type=str)
+    parser.add_argument("--img_pattern", help="Image pattern", type=str, default="*.nii.gz")
+    args = parser.parse_args()
+
+
+
+    main(args.input_base_dir, args.output_base_dir, args.datasets, threshold_factor, corner_size, img_pattern)
