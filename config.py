@@ -24,18 +24,19 @@ class Training_config():
   
     # Load pre trained model:
     load_pre_trained_model:bool = False  # if true will load pre-train model  
-    load_model_path:Path =  'models/WMH_PRELIM_TEST/_model_remove:_FLAIR/TBI_ISLES2022_BRATS_MSSEG_ATLAS/2025-06-30_12-04/WMH_PRELIM_TEST_random_drop_True_2025-06-30_12-04_Epoch_49.pth'
+    load_model_path:Path =  None
     ## Remove modality from the training set (can use for testing the agnostic channel)
-    modality_remove = 'FLAIR' # Can be: str, list, or None. Single modality (str) or multiple modalities (list) to remove. None if no modality to be dropped 
+    modality_remove = None # Can be: str, list, or None. Single modality (str) or multiple modalities (list) to remove. None if no modality to be dropped 
     random_drop:int = 1 # 1 for to be dropped and 0 for not to be dropped. 
     #### admin  ####
     wandb_active:bool = True
     project_name:str = "Agnostic_channel"   # wandb project name
     model_save_path:str = "models/" + project_name + "/_model_remove:_" + str(modality_remove) + "/" # path to save the model
     ### Layers in model specific to domain invariant slot ###
-    agnostic_path:bool = True
-    agnostic_channel:bool = True
-    agnostic_chan_augs: bool = True
+    agnostic_path:bool = False
+    agnostic_channel:bool = False
+    agnostic_chan_augs: bool = False
+   
     ##### Baselines #####
     rand_assign_channels:bool = False
     single_slot:bool = False  
@@ -56,7 +57,7 @@ class Database_config():
     channels["BRATS"] = ["FLAIR", "T1", "T1c", "T2"]
     channels["ATLAS"] = ["T1"]
     channels["MSSEG"] = ['FLAIR', "T1", "T1c", "T2", "PD"]
-    channels["ISLES"] = ["FLAIR", "T1", "T2"," DWI"]      # DWI change to invar channel   invar 
+    channels["ISLES"] = ["FLAIR", "T1", "T2","DWI"]      # DWI change to invar channel   invar 
     channels["WMH"] = ["FLAIR", "T1"]
     channels["VOETS2"] = ["T1c","T2"]  # DOUBLE CHECK.   
     channels["TBI"] = ["FLAIR", "T1", "T2", "SWI"]
@@ -147,20 +148,14 @@ class Database_config():
     mask_path["VESTIBS"] = "data/VESTIBS/Masks"
 
 class Test_config():
+
     save_segs:bool = False  # True to save the segmentation outputs
-    save_path:Path = "save_segs/VOETS2____MSSES_BRATS_ATLAS_VESTIBS_TBI_ISLES2022_WMH/"  # save niftis generated
-    #model_file_path:Path = 'models/Mixup/_model_remove:_None/ATLAS_MSSEG_TBI_BRATS_WMH/2025-02-15_19-10/Mixup_random_drop_TrueATLAS_MSSEG_TBI_BRATS_WMH2025-02-15_19-10_BEST_AVERAGE.pth'#'models/Mixup/_model_remove:_FLAIR/MSSEG_BRATS_ATLAS_TBI_ISLES/2025-02-04_23-08/Mixup_random_drop_TrueMSSEG_BRATS_ATLAS_TBI_ISLES2025-02-04_23-08_BEST_AVERAGE.pth'  #models/new_test_BRATS_ATLAS_WMH_MSSEG_TBI_random_drop_0_Epoch_599.pth' #'models/Train_BRATS_TBI_ATLAS_MSSEG_WMH.pth' # "models/new_test_BRATS_ATLAS_WMH_MSSEG_TBI_random_drop_0_checkpoint_Epoch_599.pt"  # "models/MSSEG/_random_drop_0_2024-12-04_16-15_checkpoint_Epoch_99.pt" #"models/MSSEG/rand_slot_allocation_random_drop_0_2024-12-09_16-01_checkpoint_Epoch_99.pt"
-    model_net_type: str = "unet_deep"    # 'unet_old', 'unet_deep' # the type of the pre-train model
-    num_modalities_trained_on: int = 6# the number of modalities included in training
-    #: dict[str,list[int]] = {"VOETS2":[3,5,4],"BRATS":[1,3,4,5], "ATLAS":[3], "MSSEG":[1,3,4,5,0], "ISLES":[1,3,5,0], "TBI":[1,3,5,2], "WMH":[1,3]} #The allocated channel index of the modalities(each channel) in the testing databases (start from 0) For example "ATLAS": [3] means the T1 modality in ATLAS will be allocated to the forth channel "VOETS2":[1,5],
-    
-    # Slot 
-    rand_assign:bool = True # True to randomly assign the channels to the model
-    agnostic_channel:bool =  False
-    single_slot:bool = False
-    modality_remove = 'DWI' #Can be: str, list, or None. Modalities to be completely removed during test in dataloader. 
-    agnostic_path:bool = False
-    modality_rem_train: str = None # the modality that was removed during training and now want to test in the invariant slot.
+    save_path:Path = "save_segs/"  # save niftis generated of segmentation masks
+    croppped_input_size: list = [96, 96, 96] # ensure is same as training cropped input size
+    #baseline 
+    single_slot:bool = False   # True to use a single slot for the model
+    rand_assign:bool = False   # True to randomly assign the channels to the model
+    model_net_type:str = "unet_deep"   # multiunet 
 
 
 
@@ -261,4 +256,10 @@ def save_config_file(model_save_path):
     
     print(f"Config file saved as text to: {destination_path}")
     return destination_path
+
+
+
+
+
+
 

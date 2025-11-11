@@ -109,7 +109,24 @@ The pipeline is set up to be trained on one or more datasets of 3D medical image
 
 ## Quick Use
 
-Use pre trained model for inference on data with unseen modality assigned to agnostic channel: 
+Use pre trained model for inference on data with seen modalities, unseen modalities and combination of seen and unseen modality. WHere unseen modality is assigned to the agnostic channel and seen modalities are asssigned to modality specific input channels, the model below was trained on the following modalities ['FLAIR', 'PD', 'SWI', 'T1', 'T1c', 'T2'] hence, if you have a modality not here you can place in agnostic channel
+In this example we test with ISLES15 (stroke dataset) with a combination of seen and unseen modalities. Unseen modality DWI is placed in agnostic channel: (ISLES15 is publically available to test)
+ ```bash
+         # Pre trained agnostic path model:
+         python test.py --datasets_to_test 'ISLES' --modalities_to_test "0_1_2_3" --device_id 1 --trained_on 'TBI_WMH_BRATS_MSSEG_ATLAS' --model_name 'setting_1_agnostic_path' --agnostic_path --agnostic_channel --modality_for_agnostic_channel 'DWI' 
+
+
+         # pre trained agnostic channel (no agnostic path only channel) 
+         python test.py --datasets_to_test 'ISLES' --modalities_to_test "0_1_2_3" --device_id 1 --trained_on 'TBI_WMH_BRATS_MSSEG_ATLAS' --model_name 'setting_1_agnostic_channel' --agnostic_channel --modality_for_agnostic_channel 'DWI'
+
+
+         # pre trained standard model (no agnostic channel or path, hence cannot utilise new modality)
+         python test.py --datasets_to_test 'ISLES' --modalities_to_test "0_1_2" --device_id 1 --trained_on 'TBI_WMH_BRATS_MSSEG_ATLAS' --model_name 'setting_1_standard' --modality_remove 'DWI'
+         
+ ```
+
+ There are also checkpoints from setting 2 from the paper- where FLAIR was removed during training and used in agnostic channel at test time.
+
 
 
 

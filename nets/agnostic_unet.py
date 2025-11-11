@@ -17,10 +17,10 @@ class res_unet(nn.Module):
     ) -> None:
         super().__init__()
 
-        if invariant_channel:
-            print("RES_UNET INIT WITH Extra Invariant Layers")
-        elif not invariant_channel:
-            print("RES_UNET INIT WITHOUT Extra Invariant Layers")
+        # if invariant_channel:
+        #     print("RES_UNET INIT WITH Extra Agnostic Pathway")
+        # elif not invariant_channel:
+        #     print("RES_UNET INIT WITHOUT Agnostic Pathway")
 
         dropout = 0.2
         self.invariant_channel_enabled = invariant_channel

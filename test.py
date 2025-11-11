@@ -24,6 +24,7 @@ class ModelTester:
         self.checkpoint = checkpoint
         self.initialize_variables()
         self.setup_modalities()
+        self.num_modalities_trained_on = len(self.total_modalities)
         self.initialize_metrics()
 
     def initialize_variables(self):
@@ -33,7 +34,6 @@ class ModelTester:
         self.database_config = config.Database_config()
         self.test_config = config.Test_config()
         self.rand_assign = self.test_config.rand_assign
-        self.cropped_input_size = [96, 96, 96]     # make sure this is the same as crop size used during training.
         self.img_index = 0
         self.label_index = 1
         self.total_modalities = set()
@@ -45,21 +45,28 @@ class ModelTester:
         self.device = torch.device(self.cuda_id)
         self.validate_outputs = {} 
         self.test_config.model_file_path = self.checkpoint
+        self.agnostic_path = self.args.agnostic_path
+        self.modality_remove = self.args.modality_remove
+        self.modality_for_agnostic_channel = self.args.modality_for_agnostic_channel
+        self.agnostic_channel = self.args.agnostic_channel
+        self.model_name = self.args.model_name
+  
+
 
     def setup_modalities(self):
         self.channels_copy = copy.deepcopy(self.database_config.channels)
         for data in self.datasetlist:
-            if self.test_config.agnostic_path:
-                if self.test_config.modality_rem_train is None:
+            if self.agnostic_path or self.agnostic_channel:
+                if self.modality_for_agnostic_channel is None:
                     self.database_config.channels[data].append("invar")
-                elif self.test_config.modality_rem_train is not None:
-                    self.database_config.channels[data] = ["invar" if modality == self.test_config.modality_rem_train else modality for modality in self.database_config.channels[data]]
+                elif self.modality_for_agnostic_channel is not None:
+                    self.database_config.channels[data] = ["invar" if modality == self.modality_for_agnostic_channel else modality for modality in self.database_config.channels[data]]
                     
             # if removing modality completely from the dataset during testing
-            if  self.test_config.modality_remove is not None:
-                self.database_config.channels[data] = [modality for modality in self.database_config.channels[data] if modality not in self.test_config.modality_remove]
+            if  self.modality_remove is not None:
+                self.database_config.channels[data] = [modality for modality in self.database_config.channels[data] if modality not in self.modality_remove]
 
-            if self.test_config.agnostic_path:
+            if self.agnostic_path or self.agnostic_channel:
                 self.total_modalities.add("invar")
             
             self.total_modalities = self.total_modalities.union(set(self.database_config.channels[data]))
@@ -68,10 +75,10 @@ class ModelTester:
         self.total_modalities = sorted(list(self.total_modalities))
 
         # dataset to test (the above was for dataset trained on
-        if self.test_config.modality_rem_train is not None:
-            self.database_config.channels[self.datasets_to_test] = ["invar" if modality == self.test_config.modality_rem_train else modality for modality in self.database_config.channels[self.datasets_to_test]]     
-        if  self.test_config.modality_remove is not None:
-                self.database_config.channels[self.datasets_to_test] = [modality for modality in self.database_config.channels[self.datasets_to_test] if modality not in self.test_config.modality_remove]           
+        if self.modality_for_agnostic_channel is not None:
+            self.database_config.channels[self.datasets_to_test] = ["invar" if modality == self.modality_for_agnostic_channel else modality for modality in self.database_config.channels[self.datasets_to_test]]     
+        if  self.modality_remove is not None:
+                self.database_config.channels[self.datasets_to_test] = [modality for modality in self.database_config.channels[self.datasets_to_test] if modality not in self.modality_remove]           
 
 
     def initialize_metrics(self):
@@ -99,7 +106,7 @@ class ModelTester:
             segs=segs,
             workers=2,
             dataset= dataset,
-            modality_remove=self.test_config.modality_remove,
+            modality_remove=self.modality_remove,
             channels = self.channels_copy[dataset],
             image_only=False,
            
@@ -111,7 +118,7 @@ class ModelTester:
             if self.test_config.single_slot:
                 model = Unet_deep(in_channels=1,out_channels=1,invariant_channel=False).to(self.device)
             else:
-                model = Unet_deep(in_channels=len(self.total_modalities), out_channels=1,invariant_channel=self.test_config.agnostic_path).to(self.device)
+                model = Unet_deep(in_channels=len(self.total_modalities), out_channels=1,invariant_channel=self.agnostic_path).to(self.device)
 
         elif self.test_config.model_net_type == "unet_old":
             if self.test_config.single_slot:
@@ -149,7 +156,7 @@ class ModelTester:
                             val_data,
                             combination,
                             self.args.datasets_to_test,
-                            self.test_config.num_modalities_trained_on,
+                            self.num_modalities_trained_on,
                             self.channel_map,
                         )
                     else:
@@ -157,7 +164,7 @@ class ModelTester:
                             val_data,
                             combination,
                             self.args.datasets_to_test,
-                            self.test_config.num_modalities_trained_on,
+                            self.num_modalities_trained_on,
                             self.channel_map,
                         )
 
@@ -171,7 +178,7 @@ class ModelTester:
                 else:
                     label = val_data[1].to(self.device)
 
-                roi_size = (self.cropped_input_size[0], self.cropped_input_size[1], self.cropped_input_size[2])
+                roi_size = (self.test_config.croppped_input_size[0], self.test_config.croppped_input_size[1], self.test_config.croppped_input_size[2])
                 sw_batch_size = 1
 
                
@@ -222,7 +229,7 @@ class ModelTester:
             self.mean_dice_comb.append([modality_list, (np.round(metric[dataset]["dice"], 4))])
 
     def run(self):
-        print(f"Random assign: {self.rand_assign}\n Domain invariant slot: {self.test_config.agnostic_path}\n modality removed during training: {self.test_config.modality_remove}")
+        print(f"Random assign: {self.rand_assign}\n Domain agnostic path: {self.agnostic_path}\n modality to be used in agnostic channel: {self.modality_for_agnostic_channel} \n Domain agnostic channel: {self.agnostic_channel}")
         print("Total modalities: ", self.total_modalities)
 
         dataset = self.args.datasets_to_test
@@ -232,7 +239,7 @@ class ModelTester:
             self.channel_map[dataset] = utils.map_channels(self.database_config.channels[dataset], self.total_modalities, rand_assign=self.rand_assign)
         print("channel map:", dataset, self.channel_map[dataset])
 
-        print("Testing: ", dataset)
+        print(f"Testing: {dataset} \n\n")
         self.create_val_loader(dataset)
         torch.cuda.set_device(self.cuda_id)
         model = self.load_model()
@@ -244,11 +251,13 @@ class ModelTester:
 
         for combination in modalities:
             modality_list = [self.database_config.channels[self.datasets_to_test][seg_channel] for seg_channel in combination]
-            print(f"Testing on: {'_'.join(modality_list)} {combination}")
+            print(f"Testing on: {'_'.join(modality_list)} {combination}\n\n")
             self.evaluate_model(model, combination, modality_list)
 
 
         print(tabulate.tabulate(self.mean_dice_comb, headers=["Combination", "Mean Dice"]))
+        print("\n ---------------------------------------------------------------\n")
+        print(f" Completed test for {dataset} with modalities: {modality_list}. Using model: {self.model_name}\n\n")
     
 
     def single_slot_ensemble(self):
@@ -314,6 +323,7 @@ class ModelTester:
             print(f"Patient {i}: Dice = {score:.4f}")
         print(f"Mean Ensemble Dice: {np.mean(dice_scores):.4f}")
         print(f"Std Ensemble Dice: {np.std(dice_scores):.4f}")
+
         
         # Final cleanup
         del all_predictions, all_labels, final_predictions
@@ -357,33 +367,46 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model_name", help="The name of the model to test", type=str, default=None
     )
+    parser.add_argument(
+        "--agnostic_path", help="True if using agnostic path", action='store_true'
+    )
+    parser.add_argument(
+        "--modality_for_agnostic_channel", help="The modality for the agnostic channel", type=str, default=None
+    )
+    parser.add_argument(
+        "--agnostic_channel", help="True if using agnostic channel", action='store_true'
+    )
+    parser.add_argument("--modality_remove", help="The modality to be removed", type=str, default=None)
 
     args = parser.parse_args()
 
-    ####################
 
-    args.datasets_to_test = 'ISLES'
-    args.modalities_to_test = "0_1_2" #ic order of modalities
-    args.test_all_combinations = 0
-    args.device_id = 1
-    args.trained_on = "TBI_WMH_BRATS_MSSEG_ATLAS" #DATASETS the model was trained on
-    args.checkpoint = 'models/WMH_PRELIM_TEST/_model_remove:_None/TBI_WMH_BRATS_MSSEG_ATLAS/2025-06-13_19-14/WMH_PRELIM_TEST_random_drop_True_2025-06-13_19-14_Epoch_599.pth' #'models/BASELINE/models_run2/models/WMH_PRELIM_TEST/_model_remove:_FLAIR/TBI_ISLES2022_BRATS_MSSEG_ATLAS/2025-06-17_12-20/WMH_PRELIM_TEST_random_drop_True_2025-06-17_12-20_Epoch_549.pth' #'models/Agnostic_channel/_model_remove:_FLAIR/ISLES2022_MSSEG_BRATS_TBI_ATLAS/2025-09-03_12-27/Agnostic_channel_random_drop_True_2025-09-03_12-27_Epoch_599.pth'        # None if using the pre defined checkpoints in checkpoint_paths.json and model name for own models.
-    args.model_name = 'own_checkpoint'   # only applicable is checkpoint is None 
-  
-    single_slot_model = False
+
+
+    # args.datasets_to_test = 'ISLES'
+    # args.modalities_to_test = "0_1_2_3" #ic order of modalities 
+    # args.device_id = 1
+    # args.trained_on = "TBI_WMH_BRATS_MSSEG_ATLAS" #DATASETS the model was trained on
+    # args.checkpoint =  None #'models/WMH_PRELIM_TEST/_model_remove:_None/TBI_WMH_BRATS_MSSEG_ATLAS/2025-06-13_19-14/WMH_PRELIM_TEST_random_drop_True_2025-06-13_19-14_Epoch_599.pth'   # None if using the pre defined checkpoints in checkpoint_paths.json and model name for own models.
+    # args.model_name = 'setting_1_agnostic_channel'   # only applicable is checkpoint is None 
+    # args.agnostic_path = False
+    # args.agnostic_channel = True
+    # args.modality_for_agnostic_channel ='DWI'
+
     
-    ######################################################
+
     # Load test checkpoints
     checkpoint = utils.load_test_checkpoints(args.model_name,args.checkpoint)
+
     
     #Run model: Differs for single slot model as need to ensemble predictions across modalities.
-    
-    if not single_slot_model: 
+    test_config = config.Test_config()
+    if not test_config.single_slot:
         tester = ModelTester(args,checkpoint)
         x=tester.run()
         x,y = tester.return_dictionary_and_label()
     
-    if single_slot_model:
+    if test_config.single_slot:
         tester = ModelTester(args,checkpoint)
         tester.single_slot_ensemble()
             
