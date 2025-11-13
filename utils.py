@@ -12,6 +12,7 @@ from nets.agnostic_residual_block_identity import ResidualUnit_changed as Residu
 from nets.agnostic_unet import Convolution
 import torch.nn as nn
 import os
+from datetime import datetime
 
 
 def rand_assign_channels(
@@ -273,7 +274,7 @@ def add_invar_input_to_pre_trained(model: dict) -> dict:
     # input size of first layer
     input_size = model["conv_1.conv.unit0.conv.weight"].shape[1]
 
-    print(f"Input channels of model: {input_size}")
+    print(f"Initial Input channels of model: {input_size}")
     # additinal input channel
     num_input_channels = input_size + 1
     # create a new Conv3d layer with an additional input channel
@@ -281,7 +282,7 @@ def add_invar_input_to_pre_trained(model: dict) -> dict:
     new_conv1 = ResidualUnit(
         spatial_dims=3,
         in_channels=num_input_channels,
-        out_channels=8,
+        out_channels=num_input_channels,
         strides=1,
         kernel_size=3,
         subunits=1,
@@ -289,7 +290,7 @@ def add_invar_input_to_pre_trained(model: dict) -> dict:
     )
     new_down_conv1 = Convolution(
         spatial_dims=3,
-        in_channels=8,
+        in_channels=num_input_channels,
         out_channels=32,
         strides=1,
         kernel_size=3,
@@ -317,11 +318,11 @@ def add_invar_input_to_pre_trained(model: dict) -> dict:
     model["down_conv_1.conv.bias"] = new_down_conv1.conv.bias
 
     print(
-        f'Input channels of model after update: {model["conv_1.conv.unit0.conv.weight"].shape[1]}'
+        f'Input channels of model after adding agnostic channel: {model["conv_1.conv.unit0.conv.weight"].shape[1]}'
     )
-    print(
-        f'Input channels of model after update: {model["conv_1.conv.unit0.conv.weight"][1][4]}'
-    )
+    # print(
+    #     f'Input channels of model after update: {model["conv_1.conv.unit0.conv.weight"][1][4]}'
+    # )
 
     return model
 
@@ -340,10 +341,7 @@ def add_invar_layers_to_pre_trained(
 
     modality_channels = original_input_size
 
-    print(f"Original input channels: {original_input_size}")
-    print(f"Modality channels : {modality_channels}")
-
-    print(f"Converting to unet_deep architecture...")
+    print(f"Initial Input channels of model: {modality_channels}")
 
     # Create invariant stream exactly like unet_deep
     invariant_stream = nn.Sequential(
@@ -430,20 +428,7 @@ def add_invar_layers_to_pre_trained(
         model["down_conv_1.conv.bias"] = new_down_conv1.conv.bias
 
     print(
-        f"✓ Kept conv_1 unchanged: {modality_channels} -> {modality_channels} (modality channels)"
-    )
-    print(f"✓ Added invariant_stream: 1 -> 8 -> 16 -> {invariant_out_channels}")
-    print(
-        f"✓ Updated down_conv_1: {downstream_in_channels} -> 32 (concatenated features)"
-    )
-    print(
-        f"✓ Architecture flow: modalities({modality_channels}) -> conv_1({modality_channels}) \\"
-    )
-    print(
-        f"                                                                        concat({downstream_in_channels}) -> down_conv_1(32)"
-    )
-    print(
-        f"                      invariant(1) -> invariant_stream({invariant_out_channels}) /"
+        f'Input channels of model after adding agnostic channel: {model["conv_1.conv.unit0.conv.weight"].shape[1]}'
     )
 
     return model
@@ -576,3 +561,32 @@ def load_test_checkpoints(model_name:str,checkpoint_own:str):
     return checkpoint
 
 
+
+
+
+
+def save_config_file(model_save_path):
+    """
+    Save the entire config.py file as a text file to the model save directory.
+    This preserves the exact configuration used for training.
+    
+    Args:
+        model_save_path: Path where the model is being saved
+    """
+    import inspect
+    # Get the path of the current config.py file
+    current_file = inspect.getfile(inspect.currentframe())
+    # Create configs directory in the model save path
+    config_dir = os.path.join(os.path.dirname(model_save_path), 'configs')
+    os.makedirs(config_dir, exist_ok=True)
+    # Create filename with timestamp
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    config_filename = f'config_{timestamp}.txt'
+    destination_path = os.path.join(config_dir, config_filename)
+    # Read the config.py file and save as text
+    with open(current_file, 'r') as source_file:
+        config_content = source_file.read()
+    with open(destination_path, 'w') as dest_file:
+        dest_file.write(config_content)
+    print(f"Config file saved as text to: {destination_path}")
+    return destination_path

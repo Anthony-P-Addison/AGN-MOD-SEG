@@ -49,7 +49,7 @@ class ModelTrainer:
         self.randomly_drop = bool(self.train_config.random_drop)
         self.single_slot = self.train_config.single_slot
         self.wandb_active = self.train_config.wandb_active
-        self.agnostic_chan_augs = self.train_config.agnostic_chan_augs
+        self.agnostic_chan_augs = self.args.agnostic_chan_augs
         self.lr_sched = self.train_config.lr_sched
         self.held_out_datasets = self.train_config.held_out_datasets or []
         self.cropped_input_size = self.train_config.cropped_input_size
@@ -74,7 +74,7 @@ class ModelTrainer:
             )
             if not os.path.exists(self.model_save_path):
                 os.makedirs(self.model_save_path)
-            config.save_config_file(self.model_save_path)
+            utils.save_config_file(self.model_save_path)
 
             wandb.init(
                 project=self.train_config.project_name,
@@ -256,7 +256,7 @@ class ModelTrainer:
                 )
 
     def train(self):
-        print('\n Total Progress Bar:') 
+        
         for epoch in tqdm(range(self.epoched, self.epochs)):
             print("-" * 10)
             self.model.train()
@@ -273,245 +273,232 @@ class ModelTrainer:
 
             for batch_data in zip(*self.train_loaders):
                 step += 1
-                epoch_len = max(1, self.data_size // self.train_config.train_batch_size)
-                progress_bar = tqdm(
-                enumerate(zip(*self.train_loaders), start=1),
-                total=epoch_len,
-                desc=f"Epoch {epoch + 1}/{self.epochs}",
-                leave=False,)
+                modality_outputs = []
+                aux_outputs = []
+                labels = []
+                total_modalities_dropped = []
 
-                for step,batch_data in progress_bar:
+                for dataset in self.datasetlist:
+                    loader_index = self.data_loader_map[dataset]
+                    batch = batch_data[loader_index]
 
+                    if dataset == "BRATS":
+                        if self.randomly_drop:
+                            (
+                                modalities_dropped,
+                                modalities_remaining,
+                                batch[self.img_index],
+                            ) = utils.rand_set_channels_to_zero_with_invar(
+                                self.channels["BRATS"],
+                                batch[self.img_index],
+                                mask_data=batch[self.mask_index],
+                                agnostic_channel=self.agnostic_channel,
+                                batch_label_data=batch[self.label_index],
+                                device_id=self.args.device_id,
+                                agnostic_chan_augs=self.agnostic_chan_augs,
+                                combination_map=self.combination_map["BRATS"],
+                                augmentation_config=self.aug_config,
+                            )
+                            for i in range(batch[self.label_index].shape[0]):
+                                if self.database_config.BRATS_two_channel_seg:
+                                    if (0 not in modalities_remaining[i]) and (3 not in modalities_remaining[i]):
+                                        seg_channel = 1
+                                    else:
+                                        seg_channel = 0
+                                    if self.database_config.BRATS_two_channel_seg:
+                                        label = batch[self.label_index][
+                                            i, [seg_channel], :, :, :
+                                        ].to(self.device)
+                                else:
+                                    label = batch[self.label_index].to(self.device)
+                        else:
+                            label = batch[self.label_index].to(self.device)
 
-                    modality_outputs = []
-                    aux_outputs = []
-                    labels = []
-                    total_modalities_dropped = []
+                        if self.single_slot:
+                            input_data, _ = utils.single_slot(batch[self.img_index])
+                        else:
+                            input_data = torch.from_numpy(
+                                np.zeros(
+                                    (
+                                        batch[self.img_index].shape[0],
+                                        len(self.total_modalities),
+                                        self.cropped_input_size[0],
+                                        self.cropped_input_size[1],
+                                        self.cropped_input_size[2],
+                                    ),
+                                    dtype=np.float32,
+                                )
+                            )
 
-                    for dataset in self.datasetlist:
-                        loader_index = self.data_loader_map[dataset]
+                            if self.rand_assign_channels:
+                                self.channel_map["BRATS"] = utils.rand_assign_channels(
+                                    self.channels["BRATS"], self.total_modalities
+                                )
+
+                            input_data[:, self.channel_map["BRATS"], :, :, :] = batch[self.img_index]
+
+                        input_data = input_data.to(self.device)
+                        modality_output = self.model(input_data)
+                        modality_outputs.append(modality_output)
+                        labels.append(label)
+                        if self.randomly_drop:
+                            total_modalities_dropped.append(modalities_dropped)
+
+                    elif dataset == "TBI":
+                        loader_index = self.data_loader_map["TBI"]
                         batch = batch_data[loader_index]
+                        TBI_multi_channel_seg = self.database_config.TBI_multichannel
 
-                        if dataset == "BRATS":
+                        if self.single_slot or self.randomly_drop:
+                            if self.single_slot:
+                                input_data, modalities_remaining = utils.single_slot(batch[self.img_index])
+
                             if self.randomly_drop:
                                 (
                                     modalities_dropped,
                                     modalities_remaining,
                                     batch[self.img_index],
                                 ) = utils.rand_set_channels_to_zero_with_invar(
-                                    self.channels["BRATS"],
+                                    self.channels["TBI"],
                                     batch[self.img_index],
                                     mask_data=batch[self.mask_index],
                                     agnostic_channel=self.agnostic_channel,
                                     batch_label_data=batch[self.label_index],
                                     device_id=self.args.device_id,
                                     agnostic_chan_augs=self.agnostic_chan_augs,
-                                    combination_map=self.combination_map["BRATS"],
+                                    combination_map=self.combination_map["TBI"],
                                     augmentation_config=self.aug_config,
                                 )
-                                for i in range(batch[self.label_index].shape[0]):
-                                    if self.database_config.BRATS_two_channel_seg:
-                                        if (0 not in modalities_remaining[i]) and (3 not in modalities_remaining[i]):
-                                            seg_channel = 1
-                                        else:
-                                            seg_channel = 0
-                                        if self.database_config.BRATS_two_channel_seg:
-                                            label = batch[self.label_index][
-                                                i, [seg_channel], :, :, :
-                                            ].to(self.device)
-                                    else:
-                                        label = batch[self.label_index].to(self.device)
+
+                            if (
+                                (0 not in modalities_remaining)
+                                and (2 not in modalities_remaining)
+                                and (3 not in modalities_remaining)
+                            ):
+                                seg_channel = 2
+                            elif (
+                                (0 not in modalities_remaining)
+                                and (2 not in modalities_remaining)
+                                and (3 in modalities_remaining)
+                            ):
+                                seg_channel = 1
+                            elif 3 not in modalities_remaining:
+                                seg_channel = 0
+                            else:
+                                seg_channel = 2
+
+                            if TBI_multi_channel_seg:
+                                label = batch[self.label_index][:, [seg_channel], :, :, :].to(self.device)
                             else:
                                 label = batch[self.label_index].to(self.device)
 
-                            if self.single_slot:
-                                input_data, _ = utils.single_slot(batch[self.img_index])
-                            else:
-                                input_data = torch.from_numpy(
-                                    np.zeros(
-                                        (
-                                            batch[self.img_index].shape[0],
-                                            len(self.total_modalities),
-                                            self.cropped_input_size[0],
-                                            self.cropped_input_size[1],
-                                            self.cropped_input_size[2],
-                                        ),
-                                        dtype=np.float32,
-                                    )
-                                )
-
-                                if self.rand_assign_channels:
-                                    self.channel_map["BRATS"] = utils.rand_assign_channels(
-                                        self.channels["BRATS"], self.total_modalities
-                                    )
-
-                                input_data[:, self.channel_map["BRATS"], :, :, :] = batch[self.img_index]
-
-                            input_data = input_data.to(self.device)
-                            modality_output = self.model(input_data)
-                            modality_outputs.append(modality_output)
-                            labels.append(label)
-                            if self.randomly_drop:
-                                total_modalities_dropped.append(modalities_dropped)
-
-                        elif dataset == "TBI":
-                            loader_index = self.data_loader_map["TBI"]
-                            batch = batch_data[loader_index]
-                            TBI_multi_channel_seg = self.database_config.TBI_multichannel
-
-                            if self.single_slot or self.randomly_drop:
-                                if self.single_slot:
-                                    input_data, modalities_remaining = utils.single_slot(batch[self.img_index])
-
-                                if self.randomly_drop:
-                                    (
-                                        modalities_dropped,
-                                        modalities_remaining,
-                                        batch[self.img_index],
-                                    ) = utils.rand_set_channels_to_zero_with_invar(
-                                        self.channels["TBI"],
-                                        batch[self.img_index],
-                                        mask_data=batch[self.mask_index],
-                                        agnostic_channel=self.agnostic_channel,
-                                        batch_label_data=batch[self.label_index],
-                                        device_id=self.args.device_id,
-                                        agnostic_chan_augs=self.agnostic_chan_augs,
-                                        combination_map=self.combination_map["TBI"],
-                                        augmentation_config=self.aug_config,
-                                    )
-
-                                if (
-                                    (0 not in modalities_remaining)
-                                    and (2 not in modalities_remaining)
-                                    and (3 not in modalities_remaining)
-                                ):
-                                    seg_channel = 2
-                                elif (
-                                    (0 not in modalities_remaining)
-                                    and (2 not in modalities_remaining)
-                                    and (3 in modalities_remaining)
-                                ):
-                                    seg_channel = 1
-                                elif 3 not in modalities_remaining:
-                                    seg_channel = 0
-                                else:
-                                    seg_channel = 2
-
-                                if TBI_multi_channel_seg:
-                                    label = batch[self.label_index][:, [seg_channel], :, :, :].to(self.device)
-                                else:
-                                    label = batch[self.label_index].to(self.device)
-
-                            else:
-                                label = batch[self.label_index][:, 0, :, :, :].to(self.device)
-                                label = label[:, None, :, :, :]
-
-                            if not self.single_slot:
-                                input_data = torch.from_numpy(
-                                    np.zeros(
-                                        (
-                                            batch[self.img_index].shape[0],
-                                            len(self.total_modalities),
-                                            self.cropped_input_size[0],
-                                            self.cropped_input_size[1],
-                                            self.cropped_input_size[2],
-                                        ),
-                                        dtype=np.float32,
-                                    )
-                                )
-
-                                if self.rand_assign_channels:
-                                    self.channel_map["TBI"] = utils.rand_assign_channels(
-                                        self.channel_map["TBI"], self.total_modalities
-                                    )
-
-                                input_data[:, self.channel_map["TBI"], :, :, :] = batch[self.img_index]
-
-                            input_data = input_data.to(self.device)
-                            modality_output = self.model(input_data)
-                            modality_outputs.append(modality_output)
-                            labels.append(label)
-                            if self.randomly_drop:
-                                total_modalities_dropped.append(modalities_dropped)
-
                         else:
-                            loader_index = self.data_loader_map[dataset]
-                            batch = batch_data[loader_index]
+                            label = batch[self.label_index][:, 0, :, :, :].to(self.device)
+                            label = label[:, None, :, :, :]
 
-                            if self.single_slot:
-                                input_data, _ = utils.single_slot(batch[self.img_index])
-                            else:
-                                if self.randomly_drop:
+                        if not self.single_slot:
+                            input_data = torch.from_numpy(
+                                np.zeros(
                                     (
-                                        modalities_dropped,
-                                        modalities_remaining,
-                                        batch[self.img_index],
-                                    ) = utils.rand_set_channels_to_zero_with_invar(
-                                        self.channels[dataset],
-                                        batch[self.img_index],
-                                        mask_data=batch[self.mask_index],
-                                        agnostic_channel=self.agnostic_channel,
-                                        batch_label_data=batch[self.label_index],
-                                        device_id=self.args.device_id,
-                                        agnostic_chan_augs=self.agnostic_chan_augs,
-                                        combination_map=self.combination_map[dataset],
-                                        augmentation_config=self.aug_config,
-                                    )
+                                        batch[self.img_index].shape[0],
+                                        len(self.total_modalities),
+                                        self.cropped_input_size[0],
+                                        self.cropped_input_size[1],
+                                        self.cropped_input_size[2],
+                                    ),
+                                    dtype=np.float32,
+                                )
+                            )
 
-                                input_data = torch.from_numpy(
-                                    np.zeros(
-                                        (
-                                            batch[self.img_index].shape[0],
-                                            len(self.total_modalities),
-                                            self.cropped_input_size[0],
-                                            self.cropped_input_size[1],
-                                            self.cropped_input_size[2],
-                                        ),
-                                        dtype=np.float32,
-                                    )
+                            if self.rand_assign_channels:
+                                self.channel_map["TBI"] = utils.rand_assign_channels(
+                                    self.channel_map["TBI"], self.total_modalities
                                 )
 
-                                if self.rand_assign_channels:
-                                    self.channel_map[dataset] = utils.rand_assign_channels(
-                                        self.channel_map[dataset], self.total_modalities
-                                    )
+                            input_data[:, self.channel_map["TBI"], :, :, :] = batch[self.img_index]
 
-                                input_data[:, self.channel_map[dataset], :, :, :] = batch[self.img_index]
+                        input_data = input_data.to(self.device)
+                        modality_output = self.model(input_data)
+                        modality_outputs.append(modality_output)
+                        labels.append(label)
+                        if self.randomly_drop:
+                            total_modalities_dropped.append(modalities_dropped)
 
-                            input_data = input_data.to(self.device)
-                            label = batch[self.label_index].to(self.device)
-                            combined_outs = self.model(input_data)
-                            modality_outputs.append(combined_outs)
-                            labels.append(label)
+                    else:
+                        loader_index = self.data_loader_map[dataset]
+                        batch = batch_data[loader_index]
+
+                        if self.single_slot:
+                            input_data, _ = utils.single_slot(batch[self.img_index])
+                        else:
                             if self.randomly_drop:
-                                total_modalities_dropped.append(modalities_dropped)
+                                (
+                                    modalities_dropped,
+                                    modalities_remaining,
+                                    batch[self.img_index],
+                                ) = utils.rand_set_channels_to_zero_with_invar(
+                                    self.channels[dataset],
+                                    batch[self.img_index],
+                                    mask_data=batch[self.mask_index],
+                                    agnostic_channel=self.agnostic_channel,
+                                    batch_label_data=batch[self.label_index],
+                                    device_id=self.args.device_id,
+                                    agnostic_chan_augs=self.agnostic_chan_augs,
+                                    combination_map=self.combination_map[dataset],
+                                    augmentation_config=self.aug_config,
+                                )
 
-                    self.optimizer.zero_grad()
-                    modality_outs = torch.cat(modality_outputs, dim=0)
-                    combined_labels = torch.cat(labels, dim=0)
-                    loss = self.loss_function(modality_outs, combined_labels)
+                            input_data = torch.from_numpy(
+                                np.zeros(
+                                    (
+                                        batch[self.img_index].shape[0],
+                                        len(self.total_modalities),
+                                        self.cropped_input_size[0],
+                                        self.cropped_input_size[1],
+                                        self.cropped_input_size[2],
+                                    ),
+                                    dtype=np.float32,
+                                )
+                            )
 
-                    if torch.isnan(loss):
-                        raise ValueError("Loss produced NaN value")
+                            if self.rand_assign_channels:
+                                self.channel_map[dataset] = utils.rand_assign_channels(
+                                    self.channel_map[dataset], self.total_modalities
+                                )
 
-                    loss.backward()
-                    self.optimizer.step()
-                    epoch_loss += loss.item()
-                    epoch_len = self.data_size // self.train_config.train_batch_size
-                    #print(f"{step}/{epoch_len}, train_loss: {loss.item():.4f}")
-                    progress_bar.set_postfix(
-                    loss=f"{loss.item():.4f}",
-                    lr=self.optimizer.param_groups[0]["lr"],)
-                    if self.wandb_active:
-                        wandb.log(
-                            {"loss": loss.item(), "epoch": epoch + 1, "lr": self.optimizer.param_groups[0]["lr"]}
-                        )
-            progress_bar.close()
+                            input_data[:, self.channel_map[dataset], :, :, :] = batch[self.img_index]
+
+                        input_data = input_data.to(self.device)
+                        label = batch[self.label_index].to(self.device)
+                        combined_outs = self.model(input_data)
+                        modality_outputs.append(combined_outs)
+                        labels.append(label)
+                        if self.randomly_drop:
+                            total_modalities_dropped.append(modalities_dropped)
+
+                self.optimizer.zero_grad()
+                modality_outs = torch.cat(modality_outputs, dim=0)
+                combined_labels = torch.cat(labels, dim=0)
+                loss = self.loss_function(modality_outs, combined_labels)
+
+                if torch.isnan(loss):
+                    raise ValueError("Loss produced NaN value")
+
+                loss.backward()
+                self.optimizer.step()
+                epoch_loss += loss.item()
+                epoch_len = self.data_size // self.train_config.train_batch_size
+                print(f"{step}/{epoch_len}, train_loss: {loss.item():.4f}")
+                if self.wandb_active:
+                    wandb.log(
+                        {"loss": loss.item(), "epoch": epoch + 1, "lr": self.optimizer.param_groups[0]["lr"]}
+                    )
+            # progress_bar.close()
             if self.scheduler is not None:
                 self.scheduler.step()
 
             epoch_loss /= step
-            epoch_loss/= max(step,1)
+            
             print(f"epoch {epoch + 1} average loss: {epoch_loss:.4f}")
             print("\n------------------------\n")
 
@@ -552,10 +539,11 @@ class ModelTrainer:
 
             if (epoch + 1) % self.train_config.val_interval == 0:
                 self._validate(epoch)
-
         if self.wandb_active:
             wandb.finish()
+    
 
+    
     def _validate(self, epoch):
         self.model.eval()
         with torch.no_grad():
@@ -710,6 +698,8 @@ class ModelTrainer:
 def main(train_config, aug_config, database_config, k_fold, args, channels_copy):
     trainer = ModelTrainer(train_config, aug_config, database_config, k_fold, args, channels_copy)
     trainer.train()
+   
+   
 
 
 if __name__ == "__main__":
@@ -727,9 +717,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
     args.device_id = 1
     args.datasets = "WMH"
-    args.agnostic_channel = True 
-    args.agnostic_path = True
-    args.agnostic_chan_augs = True 
+    args.agnostic_channel = False 
+    args.agnostic_path = False
+    args.agnostic_chan_augs = False 
 
     train_config = config.Training_config()
     database_config = config.Database_config()
@@ -737,4 +727,6 @@ if __name__ == "__main__":
     aug_config = config.Augmentation_config()
 
     main(train_config, aug_config, database_config, k_fold=None, args=args, channels_copy=channels_copy)
+
+
 

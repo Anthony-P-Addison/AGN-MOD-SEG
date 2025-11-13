@@ -6,7 +6,7 @@ from monai.inferers import sliding_window_inference
 from monai.metrics import DiceMetric, ConfusionMatrixMetric, MeanIoU
 from monai.transforms import Activations, AsDiscrete, Compose
 from nets.multi_unet import res_unet as Unet   
-from nets.agnostic_unet import res_unet as Unet_deep
+from nets.agnostic_unet import res_unet as agnostic_net
 import numpy as np
 import utils
 import config
@@ -114,11 +114,11 @@ class ModelTester:
         self.val_loaders.append(self.val_loader[dataset])
 
     def load_model(self):
-        if self.test_config.model_net_type == "unet_deep":
+        if self.test_config.model_net_type == "agnostic_net":
             if self.test_config.single_slot:
-                model = Unet_deep(in_channels=1,out_channels=1,invariant_channel=False).to(self.device)
+                model = agnostic_net(in_channels=1,out_channels=1,invariant_channel=False).to(self.device)
             else:
-                model = Unet_deep(in_channels=len(self.total_modalities), out_channels=1,invariant_channel=self.agnostic_path).to(self.device)
+                model = agnostic_net(in_channels=len(self.total_modalities), out_channels=1,invariant_channel=self.agnostic_path).to(self.device)
 
         elif self.test_config.model_net_type == "unet_old":
             if self.test_config.single_slot:
@@ -150,7 +150,7 @@ class ModelTester:
             self.current_sample_label = []
 
             for val_data in self.val_loader[dataset]:
-                if self.test_config.model_net_type == "unet_deep" or "unet_old":
+                if self.test_config.model_net_type == "agnostic_net" or "unet_old":
                     if self.test_config.single_slot:
                         val_data[0] = utils.create_single_channel_UNET_input(
                             val_data,
@@ -332,9 +332,6 @@ class ModelTester:
 
     def return_dictionary_and_label(self):
         return self.validate_outputs,self.current_sample_label
-
-
-
 
 
 #####################################################################

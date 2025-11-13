@@ -164,7 +164,7 @@ The following baselines can be trained/tested and adapted as fit:
 
 1. Run training:
 ```bash
-   python train_2.py --device_id 0 --datasets "DATASET1_DATASET2" --modality_remove None
+   python train_class.py --datasets "DATASET1_DATASET2..." --device_id 1 --agnostic_channel True --agnostic_path True --agnostic_chan_augs True
    ```
 
 2. Finetuning:
