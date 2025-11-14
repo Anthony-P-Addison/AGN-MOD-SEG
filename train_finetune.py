@@ -559,21 +559,6 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    args.device_id = 0
-    args.finetune_dataset = "ISLES"
-   
-    args.load_model_finetune_path = 'setting_1_agnostic_path'
-    args.checkpoint = None
-    args.add_agnostic_path_to_pre_trained_model = False
-    args.add_agnostic_channel_to_pre_trained_model = False
-    args.pre_trained_agnostic_path = True   
-    args.pre_trained_agnostic_channel= False
-    args.new_mod_finetune = 'DWI' # "DWI" # "FLAIR"
-    args.datasets_trained_initially = "BRATS_MSSEG_ATLAS_TBI_WMH" 
-    args.modality_remove_training_set = 'DWI' 
-    args.modality_remove_validation_set = None
-    
-    
     selected = [
     args.add_agnostic_path_to_pre_trained_model,
     args.add_agnostic_channel_to_pre_trained_model,
@@ -581,7 +566,6 @@ if __name__ == "__main__":
     args.pre_trained_agnostic_channel]
 
     # arguments check 
-
     selected_count = sum(bool(x) for x in selected)
     if selected_count > 1:
         raise ValueError(
@@ -608,6 +592,3 @@ if __name__ == "__main__":
 
 
                
-# python train_finetune_class.py --datasets "ISLES" --device_id 0 --load_model_finetune_path setting_1_agnostic_path --add_agnostic_path_to_pre_trained_model False --add_agnostic_channel_to_pre_trained_model False --pre_trained_agnostic_path True --pre_trained_agnostic_channel False --new_mod_finetune DWI --datasets_trained_initially BRATS_MSSEG_ATLAS_TBI_WMH --modality_remove_training_set DWI --modality_remove_validation_set None
-
-#--pre_trained_agnostic_channel False --new_mod_finetune 'DWI' --datasets_trained_initially 'BRATS_MSSEG_ATLAS_TBI_WMH'  --modality_remove_training_set 'DWI' --modality_remove_validation_set None

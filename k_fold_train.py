@@ -77,13 +77,6 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    args.datasets = "WMH"
-    args.k_fold = 7
-    args.agnostic_channel = False
-    args.agnostic_path = True
-    args.agnostic_chan_augs = True
-    args.modality_remove = 'FLAIR'
-
     if args.agnostic_path:
         args.agnostic_channel = True
 

@@ -378,20 +378,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
 
-
-
-    # args.datasets_to_test = 'ISLES'
-    # args.modalities_to_test = "0_1_2_3" #ic order of modalities 
-    # args.device_id = 1
-    # args.trained_on = "TBI_WMH_BRATS_MSSEG_ATLAS" #DATASETS the model was trained on
-    # args.checkpoint =  None #'models/WMH_PRELIM_TEST/_model_remove:_None/TBI_WMH_BRATS_MSSEG_ATLAS/2025-06-13_19-14/WMH_PRELIM_TEST_random_drop_True_2025-06-13_19-14_Epoch_599.pth'   # None if using the pre defined checkpoints in checkpoint_paths.json and model name for own models.
-    # args.model_name = 'setting_1_agnostic_channel'   # only applicable is checkpoint is None 
-    # args.agnostic_path = False
-    # args.agnostic_channel = True
-    # args.modality_for_agnostic_channel ='DWI'
-
-    
-
     # Load test checkpoints
     checkpoint = utils.load_test_checkpoints(args.model_name,args.checkpoint)
 
