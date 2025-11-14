@@ -15,10 +15,12 @@ from dataloader import get_dataloader
 import wandb
 import config
 import datetime
+import copy
+
 
 
 class FineTuneTrainer:
-    def __init__(self, args, k_fold=None):
+    def __init__(self, args, k_fold=None,channels_copy = None):
         self.args = args
         self.k_fold = k_fold
 
@@ -26,12 +28,14 @@ class FineTuneTrainer:
 
         now = datetime.datetime.now()
         self.date = now.strftime("%Y-%m-%d_%H-%M")
-
+        self.modality_remove_validation_set = self.args.modality_remove_validation_set
         self.finetune_dataset = self.args.finetune_dataset.split("_")
-
         self.train_config = config.Finetune_config()
         self.randomly_drop = bool(self.train_config.randomly_drop)
         self.Database_config = config.Database_config()
+        self.channels_copy = channels_copy
+        self.checkpoint = self.args.checkpoint
+    
         self.add_agnostic_channel_to_pre_trained_model = (
             self.args.add_agnostic_channel_to_pre_trained_model
         )
@@ -77,16 +81,18 @@ class FineTuneTrainer:
 
         self._print_training_settings()
 
-        self.channel2 = self.Database_config.channels
 
-        if self.modality_remove != None:
+        if self.modality_remove is not None:
             channels = self.Database_config.channels
-            for key, value in channels.items():
-                if key in self.datasets_trained_initially:
-                    channels[key] = [x for x in value if x != self.modality_remove]
-                    if args.new_mod_finetune ==None:
-                        for key in self.finetune_dataset:
-                            channels[key] = [x for x in value if x != self.modality_remove]
+            # remove from datasets used in pretraining
+            for ds in self.datasets_trained_initially:
+                if ds in channels:
+                    channels[ds] = [m for m in channels[ds] if m != self.modality_remove]
+            # if no new modality is being added, also remove from finetune datasets
+            if self.args.new_mod_finetune is None:
+                for ds in self.finetune_dataset:
+                    if ds in channels:
+                        channels[ds] = [m for m in channels[ds] if m != self.modality_remove]
 
 
         self.img_index = 0
@@ -136,13 +142,16 @@ class FineTuneTrainer:
         self.model_save_path = self.train_config.model_save_path
         self.val_loader = {}
 
+        
+
         self.train_loaders, self.val_loader, self.data_loader_map = get_dataloader(
             self.train_config,
+            self.args.modality_remove_validation_set,    
             self.Database_config,
             [self.datasetlist[-1]],
             self.cropped_input_size,
             self.data_size,
-            self.channel2,
+            self.channels_copy,
             k_fold=self.k_fold,
             dataset_use="Train",
         )
@@ -199,6 +208,7 @@ class FineTuneTrainer:
             print("Finetune with pre trained Agnostic Channel ONLY: ", self.args.pre_trained_agnostic_channel)
             print("Finetune with pre trained Agnostic Channel AND Path: ", self.args.pre_trained_agnostic_path)
             in_channel = len(self.total_modalities)
+            self.args.load_model_finetune_path = utils.load_test_checkpoints(self.args.load_model_finetune_path,self.checkpoint)
             print("Loading Model: ", self.args.load_model_finetune_path)
 
             if self.add_agnostic_channel_to_pre_trained_model:
@@ -310,21 +320,21 @@ class FineTuneTrainer:
                     else:  # other databases are similar
                         loader_index = self.data_loader_map[dataset]
                         batch = batch_data[loader_index]
-                        # if randomly_drop:
-                        #     _, batch[img_index] = utils.rand_set_channels_to_zero(channels[dataset], batch[img_index])     #ATLAS WILL ALWAYS BE ONE
 
+
+
+                        channels_remove_up = self.channels_copy if self.args.modality_remove_validation_set is None else self.channels
+                    
                         if self.randomly_drop:
-                            # _, batch[img_index]
-
                             all_modalities_dropped, all_modalities_remaining, batch[self.img_index] = (
                                 utils.rand_set_channels_to_zero_with_invar(
-                                    self.channels[dataset],
+                                    channels_remove_up[dataset],
                                     batch[self.img_index],
                                     mask_data=batch[self.mask_index],
                                     agnostic_channel=False,
                                     combination_map=self.combination_map[dataset],
                                 )
-                            )  # ATLAS WILL ALWAYS BE ONE CHANNEL (no drop)
+                            )  
 
                         input_data = torch.from_numpy(
                             np.zeros(
@@ -511,8 +521,8 @@ class FineTuneTrainer:
                     )
 
 
-def main(args, k_fold=None):
-    trainer = FineTuneTrainer(args, k_fold)
+def main(args, k_fold=None,channels_copy = None):
+    trainer = FineTuneTrainer(args, k_fold,channels_copy)
     trainer.train()
 
 
@@ -521,15 +531,29 @@ if __name__ == "__main__":
 
     # command line argument
     parser = argparse.ArgumentParser()
+    # robust boolean parser
+    def str2bool(v):
+        if isinstance(v, bool):
+            return v
+        v = v.lower()
+        if v in ("yes", "true", "t", "y", "1"):
+            return True
+        if v in ("no", "false", "f", "n", "0"):
+            return False
+        raise argparse.ArgumentTypeError("Boolean value expected.")
     parser.add_argument("--device_id", help="ID of the GPU", type=int, default=0)
-    parser.add_argument("--datasets", help="datasets for training, using '_' to separate", type=str)
     parser.add_argument("--load_model_finetune_path", help="The path of the pretrained model", type=str)
-    parser.add_argument("--pre_trained_agnostic_path", help="use pre trained agnostic component", type=bool, default=False)
+    parser.add_argument("--pre_trained_agnostic_path", help="use pre trained agnostic component", type=str2bool, default=False)
+    parser.add_argument("--pre_trained_agnostic_channel", help="use pre trained agnostic channel", type=str2bool, default=False)
     parser.add_argument("--datasets_trained_initially",help="modalities used for training the pre-train model using '_' to separate",type=str,)
-    parser.add_argument("--add_agnostic_channel_to_pre", help="use agnostic channel", type=bool, default=True)
-    parser.add_argument("--add_agnostic_path_to_pre", help="use agnostic path", type=bool, default=False)
+    parser.add_argument("--add_agnostic_channel_to_pre_trained_model", help="use agnostic channel", type=str2bool, default=True)
+    parser.add_argument("--add_agnostic_path_to_pre_trained_model", help="use agnostic path", type=str2bool, default=False)
     parser.add_argument("--new_mod_finetune", help="new modality to be finetuned", type=str, default=None)
     parser.add_argument("--modality_remove_training_set", help="modality to be removed from the training set of pre trained model", type=str, default=None)
+    parser.add_argument("--modality_remove_validation_set", help="modality to be removed from the validation set of pre trained model", type=str, default=None)
+    parser.add_argument("--finetune_dataset", help="datasets for finetuning, using '_' to separate", type=str)
+    parser.add_argument("--checkpoint", help="The checkpoint to test", type=str, default=None)
+ 
    
   
 
@@ -537,23 +561,24 @@ if __name__ == "__main__":
 
     args.device_id = 0
     args.finetune_dataset = "ISLES"
-    args.randomly_drop = 1
-    args.load_model_finetune_path = ('Pre_trained_models/SETTING_1/set_1_standard_model/set_1_standard_model_random_drop_True_2025-06-12_15-01_Epoch_599.pth')
-    args.add_agnostic_channel_to_pre_trained_model = False
+   
+    args.load_model_finetune_path = 'setting_1_agnostic_path'
+    args.checkpoint = None
     args.add_agnostic_path_to_pre_trained_model = False
-    args.pre_trained_agnostic_path = False   
+    args.add_agnostic_channel_to_pre_trained_model = False
+    args.pre_trained_agnostic_path = True   
     args.pre_trained_agnostic_channel= False
     args.new_mod_finetune = 'DWI' # "DWI" # "FLAIR"
     args.datasets_trained_initially = "BRATS_MSSEG_ATLAS_TBI_WMH" 
-    args.modality_remove_training_set = None
+    args.modality_remove_training_set = 'DWI' 
+    args.modality_remove_validation_set = None
     
-
+    
     selected = [
     args.add_agnostic_path_to_pre_trained_model,
     args.add_agnostic_channel_to_pre_trained_model,
     args.pre_trained_agnostic_path,
     args.pre_trained_agnostic_channel]
-
 
     # arguments check 
 
@@ -577,6 +602,12 @@ if __name__ == "__main__":
             )
 
     
+    channels_copy = copy.deepcopy(config.Database_config.channels)
 
-    main(args, k_fold=None)
+    main(args, k_fold=None,channels_copy = channels_copy)
 
+
+               
+# python train_finetune_class.py --datasets "ISLES" --device_id 0 --load_model_finetune_path setting_1_agnostic_path --add_agnostic_path_to_pre_trained_model False --add_agnostic_channel_to_pre_trained_model False --pre_trained_agnostic_path True --pre_trained_agnostic_channel False --new_mod_finetune DWI --datasets_trained_initially BRATS_MSSEG_ATLAS_TBI_WMH --modality_remove_training_set DWI --modality_remove_validation_set None
+
+#--pre_trained_agnostic_channel False --new_mod_finetune 'DWI' --datasets_trained_initially 'BRATS_MSSEG_ATLAS_TBI_WMH'  --modality_remove_training_set 'DWI' --modality_remove_validation_set None

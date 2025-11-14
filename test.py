@@ -182,7 +182,7 @@ class ModelTester:
                 sw_batch_size = 1
 
                
-                val_output = sliding_window_inference(input_data, roi_size, sw_batch_size, model)
+                val_output = sliding_window_inference(input_data, roi_size, sw_batch_size, model,overlap = 0.5)
                 val_outputs = [self.post_trans(i) for i in decollate_batch(val_output)]
                 self.current_sample_logit_predictions.append(val_output[0])
                 

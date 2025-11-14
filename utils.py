@@ -13,6 +13,7 @@ from nets.agnostic_unet import Convolution
 import torch.nn as nn
 import os
 from datetime import datetime
+import argparse
 
 
 def rand_assign_channels(
@@ -76,7 +77,7 @@ def map_combinations(dataset_modalities: list[str], invar_ratio: float = 0.2) ->
         num_combs = len(all_combinations)
         num_to_add = math.ceil((num_combs * invar_ratio))
         invar_added = len(dataset_modalities) - 1
-        
+
         for _ in range(num_to_add-1):
             all_combinations.append([invar_added])
 
@@ -92,12 +93,12 @@ def rand_set_channels_to_zero_with_invar(
     batch_label_data: torch.Tensor = None,
     device_id: str = None,
     combination_map: list = None,
-    augmentation_config = None,
+    augmentation_config=None,
 ) -> tuple[list[int], torch.Tensor]:
     """Randomly set channels to zero and handle agnostic channel with optional augmentations"""
     all_modalities_remaining = []
     all_modalities_dropped = []
-    
+
     # Keep original data for augmentations
     original_batch = batch_img_data.clone()
     # Working copy for modifications
@@ -105,105 +106,168 @@ def rand_set_channels_to_zero_with_invar(
 
     if agnostic_channel:
         # append invariant channel
-        working_batch = torch.cat((working_batch, torch.zeros((working_batch.shape[0], 1, working_batch.shape[2], working_batch.shape[3], working_batch.shape[4]))),dim=1)
-        original_batch = torch.cat((original_batch, torch.zeros((original_batch.shape[0], 1, original_batch.shape[2], original_batch.shape[3], original_batch.shape[4]))),dim=1)
-        
-    for i in range(working_batch.shape[0]):   
-    
+        working_batch = torch.cat(
+            (
+                working_batch,
+                torch.zeros(
+                    (
+                        working_batch.shape[0],
+                        1,
+                        working_batch.shape[2],
+                        working_batch.shape[3],
+                        working_batch.shape[4],
+                    )
+                ),
+            ),
+            dim=1,
+        )
+        original_batch = torch.cat(
+            (
+                original_batch,
+                torch.zeros(
+                    (
+                        original_batch.shape[0],
+                        1,
+                        original_batch.shape[2],
+                        original_batch.shape[3],
+                        original_batch.shape[4],
+                    )
+                ),
+            ),
+            dim=1,
+        )
+
+    for i in range(working_batch.shape[0]):
+
         modalities_remaining = random.choice(combination_map)
-        modalities_dropped = list(set(np.arange(len(dataset_modalities))) - set(modalities_remaining))
+        modalities_dropped = list(
+            set(np.arange(len(dataset_modalities))) - set(modalities_remaining)
+        )
+        # modalities_dropped = sorted(int(x) for x in (set(np.arange(len(dataset_modalities))) - set(map(int, modalities_remaining))))
 
         # Apply dropout and verify
-        working_batch[i,modalities_dropped,:,:,:] = 0
-        
+        working_batch[i, modalities_dropped, :, :, :] = 0
+
         # Verify dropped modalities are actually zero
         for mod in modalities_dropped:
-            if not torch.all(working_batch[i,mod,:,:,:] == 0):
+            if not torch.all(working_batch[i, mod, :, :, :] == 0):
                 print(f"Warning: Modality {mod} was not properly zeroed")
-                working_batch[i,mod,:,:,:] = 0  # Force zero if not already zero
-        
+                working_batch[i, mod, :, :, :] = 0  # Force zero if not already zero
+
         # Handle aggnostic channel with augmentations
         if agnostic_channel and len(dataset_modalities) > 2:
             invar = None
-          
+
             if agnostic_chan_augs:
                 random_number = random.random()
-                
+
                 # number below is probability of not using augmentations
                 if random_number < 0.15:
-                    invar = None   
+                    invar = None
                 else:
-                    pathology_label = batch_label_data[i,0,:,:,:]
-                    brain_mask = mask_data[i,0,:,:,:] 
+                    pathology_label = batch_label_data[i, 0, :, :, :]
+                    brain_mask = mask_data[i, 0, :, :, :]
 
-                    if len(modalities_dropped) > 0 and modalities_dropped[-1] == (len(dataset_modalities)-1):
-                        invar = original_batch[i,modalities_dropped[-1],:,:,:]
+                    if len(modalities_dropped) > 0 and modalities_dropped[-1] == (
+                        len(dataset_modalities) - 1
+                    ):
+                        invar = original_batch[i, modalities_dropped[-1], :, :, :]
                     elif len(modalities_dropped) > 0:
                         channel_add = random.sample(modalities_dropped, 1)
-                        if original_batch[i,channel_add,:,:,:].any():
-                            invar = spatial_contrast_aug(augmentation_config,channel_add,pathology_label,brain_mask,original_batch[i,:,:,:])
-                
+                        if original_batch[i, channel_add, :, :, :].any():
+                            invar = spatial_contrast_aug(
+                                augmentation_config,
+                                channel_add,
+                                pathology_label,
+                                brain_mask,
+                                original_batch[i, :, :, :],
+                            )
+
                     else:
-                        # all modalities remaining. so need to place something in invar channel. 
+                        # all modalities remaining. so need to place something in invar channel.
 
                         channel_add = random.sample(modalities_remaining[:-1], 1)
-                        invar = spatial_contrast_aug(augmentation_config,channel_add,pathology_label,brain_mask,original_batch[i,:,:,:])
+                        invar = spatial_contrast_aug(
+                            augmentation_config,
+                            channel_add,
+                            pathology_label,
+                            brain_mask,
+                            original_batch[i, :, :, :],
+                        )
 
-        
             ######## TODO:ADD MORE AUGMENTATTIONS HERE WITH A NEW SWITCH  - FOR THE INVAR CHANNEL AS APPROPTIATE##########
-        
-            # just simple add of dropped modalities no augs. 
-            if invar is None: 
-               
-                if len(modalities_dropped) > 0 and modalities_dropped[-1] == (len(dataset_modalities)-1):
-                    invar = original_batch[i,modalities_dropped[-1],:,:,:]
+
+            # just simple add of dropped modalities no augs.
+            if invar is None:
+
+                if len(modalities_dropped) > 0 and modalities_dropped[-1] == (
+                    len(dataset_modalities) - 1
+                ):
+                    invar = original_batch[i, modalities_dropped[-1], :, :, :]
                 elif len(modalities_dropped) > 0:
                     channel_add = random.sample(modalities_dropped, 1)
-                    invar = original_batch[i,channel_add,:,:,:]
+                    invar = original_batch[i, channel_add, :, :, :]
                 else:
 
                     channel_add = random.sample(modalities_remaining, 1)
                     if agnostic_chan_augs:
-                        pathology_label = batch_label_data[i,0,:,:,:]
-                        brain_mask = mask_data[i,0,:,:,:] 
-                        invar = spatial_contrast_aug(augmentation_config,channel_add,pathology_label,brain_mask,original_batch[i,:,:,:])
-                    
+                        pathology_label = batch_label_data[i, 0, :, :, :]
+                        brain_mask = mask_data[i, 0, :, :, :]
+                        invar = spatial_contrast_aug(
+                            augmentation_config,
+                            channel_add,
+                            pathology_label,
+                            brain_mask,
+                            original_batch[i, :, :, :],
+                        )
+
                     else:
-                        invar = original_batch[i,channel_add,:,:,:]
+                        invar = original_batch[i, channel_add, :, :, :]
 
             # Set invariant channel and verify dropped modalities are still zero
-            working_batch[i,[len(dataset_modalities)-1],:,:,:] = invar
-            
+            working_batch[i, [len(dataset_modalities) - 1], :, :, :] = invar
+
             # Final verification of dropped modalities
             for mod in modalities_dropped:
-                if not torch.all(working_batch[i,mod,:,:,:] == 0):
-                    print(f"Warning: Modality {mod} was not zero after invariant channel processing")
-                    working_batch[i,mod,:,:,:] = 0  # Force zero if not already zero
-            
+                if not torch.all(working_batch[i, mod, :, :, :] == 0):
+                    print(
+                        f"Warning: Modality {mod} was not zero after invariant channel processing"
+                    )
+                    working_batch[i, mod, :, :, :] = 0  # Force zero if not already zero
+
         all_modalities_dropped.append(modalities_dropped)
         all_modalities_remaining.append(modalities_remaining)
-    
-    
+
     return all_modalities_dropped, all_modalities_remaining, working_batch
 
 
-def single_slot( batch_img_data: torch.Tensor):
-    """ randomly select one channel from input and place into single invariant slot"""
+def single_slot(batch_img_data: torch.Tensor):
+    """randomly select one channel from input and place into single invariant slot"""
     batch_size, num_channels, height, width, depth = batch_img_data.shape
     # Initialize the output tensor with zeros
-    batch_img_da = torch.zeros((batch_size, 1, height, width, depth), dtype=batch_img_data.dtype, device=batch_img_data.device)
+    batch_img_da = torch.zeros(
+        (batch_size, 1, height, width, depth),
+        dtype=batch_img_data.dtype,
+        device=batch_img_data.device,
+    )
     for i in range(batch_size):
         # Randomly select one channel to keep
         selected_channel = random.randint(0, num_channels - 1)
         # Copy the selected channel to the output tensor
         batch_img_da[i, 0, :, :, :] = batch_img_data[i, selected_channel, :, :, :]
-    return batch_img_da,[selected_channel]
+    return batch_img_da, [selected_channel]
 
 
-def create_net(model_file_path,model_net_type,model_modalities_trained_on, device,cuda_id):
-    if model_net_type == "UNET":    
-        model = Unet(in_channels=model_modalities_trained_on,out_channels=1).to(device)
-        model.load_state_dict(torch.load(model_file_path, map_location={"cuda:0":cuda_id,"cuda:1":cuda_id}))
+def create_net(
+    model_file_path, model_net_type, model_modalities_trained_on, device, cuda_id
+):
+    if model_net_type == "UNET":
+        model = Unet(in_channels=model_modalities_trained_on, out_channels=1).to(device)
+        model.load_state_dict(
+            torch.load(
+                model_file_path, map_location={"cuda:0": cuda_id, "cuda:1": cuda_id}
+            )
+        )
         model.eval()
     return model
 
@@ -267,6 +331,7 @@ def save_nifti(tensor: torch.Tensor, file_path: str, affine):
 
 
 ####### Randomly initiating Agnostic channel and Agnostic channel + Agnostic pathway #######
+
 
 def add_invar_input_to_pre_trained(model: dict) -> dict:
     """Add additional input channel (randomly initialised weights) to the first layer of a pre trained model"""
@@ -427,26 +492,30 @@ def add_invar_layers_to_pre_trained(
         model["down_conv_1.conv.weight"] = new_down_conv1.conv.weight
         model["down_conv_1.conv.bias"] = new_down_conv1.conv.bias
 
+    # Note: adding the agnostic path does not change conv_1 input channels.
+    # It increases the fused input channels into down_conv_1 instead.
     print(
-        f'Input channels of model after adding agnostic channel: {model["conv_1.conv.unit0.conv.weight"].shape[1]}'
+        f'Modal stream input channels (conv_1) unchanged: {model["conv_1.conv.unit0.conv.weight"].shape[1]}'
+    )
+    print(
+        f'Downstream fused channels into down_conv_1: {model["down_conv_1.conv.weight"].shape[1]}'
     )
 
     return model
 
 
-
-
 def lr_schedule(epochs, optimizer):
     """Learning rate scheduler function that implements warmup and decay.
-    
+
     Args:
         current_epoch (int): Current training epoch
         epochs (int): Total number of epochs
         optimizer (torch.optim.Optimizer): The optimizer to create scheduler for
-        
+
     Returns:
         scheduler: LambdaLR scheduler
     """
+
     def lr_lambda(current_epoch):
         # Warm up phase (first 50 epochs)
         if current_epoch < 50:
@@ -462,13 +531,12 @@ def lr_schedule(epochs, optimizer):
             return 0.1
         # Final decay phase
         else:
-            return max(0.0, 0.1 - (0.1 * (current_epoch - 450) / float(max(1, epochs - 450))))
-    
+            return max(
+                0.0, 0.1 - (0.1 * (current_epoch - 450) / float(max(1, epochs - 450)))
+            )
+
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
     return scheduler
-
-
-
 
 
 def ensemble_across_modalities(prediction_dict, threshold=0.5):
@@ -498,10 +566,10 @@ def ensemble_across_modalities(prediction_dict, threshold=0.5):
         # Final threshold to get binary prediction
         final_pred = (mean_prob > threshold).float()
         ensembled_predictions.append(final_pred)
-        
+
         # Clear intermediate tensors
         del preds, stacked, probabilities, mean_prob, final_pred
-    
+
     return ensembled_predictions
 
 
@@ -510,42 +578,45 @@ def calculate_dice_scores(predictions, labels, device):
     Calculates Dice scores for each patient for SINGLE CHANNEL MODELS
     """
     from monai.metrics import DiceMetric
-    
+
     # Create DiceMetric once outside the loop for efficiency
-    dice_metric = DiceMetric(include_background=True, reduction="mean", get_not_nans=False)
+    dice_metric = DiceMetric(
+        include_background=True, reduction="mean", get_not_nans=False
+    )
     dice_scores = []
-    
+
     # Loop through each prediction and label pair
     for i, (pred, label) in enumerate(zip(predictions, labels)):
         # Move to GPU for calculation
         pred = pred.to(device, dtype=torch.float32)
         label = label.to(device, dtype=torch.float32)
-        
+
         # Calculate Dice for this sample
         dice_score = dice_metric(pred.unsqueeze(0), label.unsqueeze(0))
         dice_scores.append(dice_score.item())
-        
+
         # Reset metric for next calculation
         dice_metric.reset()
-        
+
         # Clear from GPU
         del pred, label
-        
+
     return np.array(dice_scores)
 
 
-
-def load_test_checkpoints(model_name:str,checkpoint_own:str):
+def load_test_checkpoints(model_name: str, checkpoint_own: str):
     """load checkpoints either  models trained by author or own checkpoints"""
-    import json 
+    import json
 
-    if model_name != 'own_checkpoint':
-        with open('checkpoint_paths.json', 'r') as f:
+    if model_name != "own_checkpoint":
+        with open("checkpoint_paths.json", "r") as f:
             checkpoint_paths = json.load(f)
-        
+
         if model_name in checkpoint_paths:
-            checkpoint = checkpoint_paths[model_name]['path']
-            print(f"Testing {model_name}: {checkpoint_paths[model_name]['description']}")
+            checkpoint = checkpoint_paths[model_name]["path"]
+            print(
+                f"Testing {model_name}: {checkpoint_paths[model_name]['description']}"
+            )
 
         else:
             print(f"Model '{model_name}' not found in checkpoint_paths.json")
@@ -554,39 +625,49 @@ def load_test_checkpoints(model_name:str,checkpoint_own:str):
                 print(f"- {name}")
 
     ## load own checkpoint ##
-    elif model_name =='own_checkpoint':
+    elif model_name == "own_checkpoint":
         checkpoint = checkpoint_own
         if checkpoint is None:
-            raise ValueError("No checkpoint path provided. Please provide a valid path to a model checkpoint file when using 'own_checkpoint' mode.")
+            raise ValueError(
+                "No checkpoint path provided. Please provide a valid path to a model checkpoint file when using 'own_checkpoint' mode."
+            )
     return checkpoint
-
-
-
-
 
 
 def save_config_file(model_save_path):
     """
     Save the entire config.py file as a text file to the model save directory.
     This preserves the exact configuration used for training.
-    
+
     Args:
         model_save_path: Path where the model is being saved
     """
     import inspect
+
     # Get the path of the current config.py file
     current_file = inspect.getfile(inspect.currentframe())
     # Create configs directory in the model save path
-    config_dir = os.path.join(os.path.dirname(model_save_path), 'configs')
+    config_dir = os.path.join(os.path.dirname(model_save_path), "configs")
     os.makedirs(config_dir, exist_ok=True)
     # Create filename with timestamp
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    config_filename = f'config_{timestamp}.txt'
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    config_filename = f"config_{timestamp}.txt"
     destination_path = os.path.join(config_dir, config_filename)
     # Read the config.py file and save as text
-    with open(current_file, 'r') as source_file:
+    with open(current_file, "r") as source_file:
         config_content = source_file.read()
-    with open(destination_path, 'w') as dest_file:
+    with open(destination_path, "w") as dest_file:
         dest_file.write(config_content)
     print(f"Config file saved as text to: {destination_path}")
     return destination_path
+
+
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    v = v.lower()
+    if v in ("yes", "true", "t", "y", "1"):
+        return True
+    if v in ("no", "false", "f", "n", "0"):
+        return False
+    raise argparse.ArgumentTypeError("Boolean value expected.")

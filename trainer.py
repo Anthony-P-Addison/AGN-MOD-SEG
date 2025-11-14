@@ -45,7 +45,7 @@ class ModelTrainer:
         self.agnostic_channel = self.args.agnostic_channel
         self.agnostic_path = self.args.agnostic_path
         self.load_model_path = self.train_config.load_model_path
-        self.modality_remove = self.train_config.modality_remove
+        self.modality_remove = self.args.modality_remove
         self.randomly_drop = bool(self.train_config.random_drop)
         self.single_slot = self.train_config.single_slot
         self.wandb_active = self.train_config.wandb_active
@@ -140,6 +140,7 @@ class ModelTrainer:
             self.data_loader_map,
         ) = get_dataloader(
             self.train_config,
+            self.modality_remove,
             self.database_config,
             self.datasetlist,
             self.cropped_input_size,
@@ -151,10 +152,11 @@ class ModelTrainer:
 
         self.val_only_loader = {}
         if self.held_out_datasets:
-            original_modality_remove = self.train_config.modality_remove
-            self.train_config.modality_remove = None
+            original_modality_remove = self.args.modality_remove
+            self.args.modality_remove = None
             _, self.val_only_loader, _ = get_dataloader(
                 self.train_config,
+                self.modality_remove,
                 self.database_config,
                 self.held_out_datasets,
                 self.cropped_input_size,
@@ -163,7 +165,7 @@ class ModelTrainer:
                 self.k_fold,
                 dataset_use="Val ONLY",
             )
-            self.train_config.modality_remove = original_modality_remove
+            self.args.modality_remove = original_modality_remove
 
     def _initialize_device_and_model(self):
         print("Running on GPU:" + str(self.args.device_id))
@@ -191,6 +193,8 @@ class ModelTrainer:
 
         print('Input channels:', self.total_modalities)
         print("Number Input Channels:", len(self.total_modalities),"\n")
+        if args.agnostic_channel:
+            assert len(self.total_modalities) > 2
     
 
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.train_config.lr)
@@ -344,86 +348,6 @@ class ModelTrainer:
                         if self.randomly_drop:
                             total_modalities_dropped.append(modalities_dropped)
 
-                    elif dataset == "TBI":
-                        loader_index = self.data_loader_map["TBI"]
-                        batch = batch_data[loader_index]
-                        TBI_multi_channel_seg = self.database_config.TBI_multichannel
-
-                        if self.single_slot or self.randomly_drop:
-                            if self.single_slot:
-                                input_data, modalities_remaining = utils.single_slot(batch[self.img_index])
-
-                            if self.randomly_drop:
-                                (
-                                    modalities_dropped,
-                                    modalities_remaining,
-                                    batch[self.img_index],
-                                ) = utils.rand_set_channels_to_zero_with_invar(
-                                    self.channels["TBI"],
-                                    batch[self.img_index],
-                                    mask_data=batch[self.mask_index],
-                                    agnostic_channel=self.agnostic_channel,
-                                    batch_label_data=batch[self.label_index],
-                                    device_id=self.args.device_id,
-                                    agnostic_chan_augs=self.agnostic_chan_augs,
-                                    combination_map=self.combination_map["TBI"],
-                                    augmentation_config=self.aug_config,
-                                )
-
-                            if (
-                                (0 not in modalities_remaining)
-                                and (2 not in modalities_remaining)
-                                and (3 not in modalities_remaining)
-                            ):
-                                seg_channel = 2
-                            elif (
-                                (0 not in modalities_remaining)
-                                and (2 not in modalities_remaining)
-                                and (3 in modalities_remaining)
-                            ):
-                                seg_channel = 1
-                            elif 3 not in modalities_remaining:
-                                seg_channel = 0
-                            else:
-                                seg_channel = 2
-
-                            if TBI_multi_channel_seg:
-                                label = batch[self.label_index][:, [seg_channel], :, :, :].to(self.device)
-                            else:
-                                label = batch[self.label_index].to(self.device)
-
-                        else:
-                            label = batch[self.label_index][:, 0, :, :, :].to(self.device)
-                            label = label[:, None, :, :, :]
-
-                        if not self.single_slot:
-                            input_data = torch.from_numpy(
-                                np.zeros(
-                                    (
-                                        batch[self.img_index].shape[0],
-                                        len(self.total_modalities),
-                                        self.cropped_input_size[0],
-                                        self.cropped_input_size[1],
-                                        self.cropped_input_size[2],
-                                    ),
-                                    dtype=np.float32,
-                                )
-                            )
-
-                            if self.rand_assign_channels:
-                                self.channel_map["TBI"] = utils.rand_assign_channels(
-                                    self.channel_map["TBI"], self.total_modalities
-                                )
-
-                            input_data[:, self.channel_map["TBI"], :, :, :] = batch[self.img_index]
-
-                        input_data = input_data.to(self.device)
-                        modality_output = self.model(input_data)
-                        modality_outputs.append(modality_output)
-                        labels.append(label)
-                        if self.randomly_drop:
-                            total_modalities_dropped.append(modalities_dropped)
-
                     else:
                         loader_index = self.data_loader_map[dataset]
                         batch = batch_data[loader_index]
@@ -557,7 +481,7 @@ class ModelTrainer:
                 if dataset in self.held_out_datasets:
                     self.channels[dataset] = self.channels_copy[dataset]
                     self.channels[dataset] = [
-                        x if x != self.train_config.modality_remove else "invar" for x in self.channels[dataset]
+                        x if x != self.args.modality_remove else "invar" for x in self.channels[dataset]
                     ]
 
                 if dataset in self.held_out_datasets:
@@ -701,26 +625,31 @@ def main(train_config, aug_config, database_config, k_fold, args, channels_copy)
    
    
 
-
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
+  
+        
     parser.add_argument("--device_id", help="ID of the GPU", type=int, default=0)
     parser.add_argument(
         "--datasets", help="datasets for training, using '_' to separate", type=str)
     parser.add_argument("--k_fold", help="k_fold cross validation number fo folds", type=int, default=None)
-    parser.add_argument("--agnostic_channel", help="use agnostic channel", type=bool, default=False)
-    parser.add_argument("--agnostic_path", help="use agnostic path", type=bool, default=False)
-    parser.add_argument("--agnostic_chan_augs", help="use agnostic channel augmentations", type=bool, default=False)
-
+    parser.add_argument("--agnostic_channel", help="use agnostic channel", type=utils.str2bool, default=False)
+    parser.add_argument("--agnostic_path", help="use agnostic path", type=utils.str2bool, default=False)
+    parser.add_argument("--agnostic_chan_augs", help="use agnostic channel augmentations", type=utils.str2bool, default=False)
+    parser.add_argument("--modality_remove", help="modality to be removed", type=str, default=None)
 
     args = parser.parse_args()
-    args.device_id = 1
-    args.datasets = "WMH"
-    args.agnostic_channel = False 
-    args.agnostic_path = False
-    args.agnostic_chan_augs = False 
+    # args.device_id = 1
+    # args.datasets = "WMH"
+    # args.agnostic_channel = False 
+    # args.agnostic_path = False
+    # args.agnostic_chan_augs = False 
+    # args.modality_remove = 'FLAIR'
 
+    if  args.agnostic_path:
+        args.agnostic_channel = True
+        
     train_config = config.Training_config()
     database_config = config.Database_config()
     channels_copy = copy.deepcopy(database_config.channels)
@@ -730,3 +659,6 @@ if __name__ == "__main__":
 
 
 
+
+
+# python train_class.py --datasets "WMH_BRATS" --device_id 1 --agnostic_channel True --agnostic_path True --agnostic_chan_augs True --modality_remove None

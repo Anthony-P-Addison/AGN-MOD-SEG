@@ -1,10 +1,10 @@
 # Modality-Agnostic Input Channels Enable Segmentation of Brain lesions in Multimodal MRI with Sequences Unavailable During Training
 
-This repository contains the Pytorch implementation of the following paper:
+This repository contains the official Pytorch implementation of the following paper:
 
  <u>[Modality Agnostic Input Channels Enable... ](https://arxiv.org/html/2509.09290v1)</u>
 
-![MultiUnet Architecture](diagrams/Input_Architecture.png)
+<img src="diagrams/Input_Architecture.png" alt="MultiUnet Architecture" width="800">
 
 ## Introduction
 
@@ -37,15 +37,15 @@ conda activate agn_mod_seg
 ```
 MultiUnet/
 ├── config.py          # Configuration settings for training,testing, finetuning  and database  selection
-├── train_2.py         # Main training script
+├── trainer.py         # Main training script
 ├── train_finetune.py  # Fine-tuning script
-├── k_fold.py          # K-fold cross-validation implementation
+├── k_fold_train.py    # K-fold cross-validation implementation
 ├── masking.py         # Mask generation utilities for datasets. 
 ├── test.py            # Main test script
 ├── utils.py           # additional functions 
-├── nets.py 
+├── nets               # folder containing network componenets    
 ├──      
-└── data/              # Dataset directory
+└── data/              # Dataset directory (can add your own datasset folder as appropriate)
     ├── BRATS/
     ├── ATLAS/
     ├── MSSEG/
@@ -85,7 +85,7 @@ The pipeline is set up to be trained on one or more datasets of 3D medical image
 
 2. Configure settings:
    - Adjust parameters in `config.py` according to your needs
-      - add your own databses in the config file under the database config EXAMPLE BRATS: 
+      - add your own databses in the config file under the database config EXAMPLE BRATS (in your instance you would fill in the information for your dataset/s in place of BRATS): 
          ```bash
          channels["BRATS"] = ["FLAIR", "T1", "T1c", "T2"]
          ...
@@ -107,39 +107,12 @@ The pipeline is set up to be trained on one or more datasets of 3D medical image
    - Set up your wandb project if using experiment tracking
 
 
-## Quick Use
-
-Use pre trained model for inference on data with seen modalities, unseen modalities and combination of seen and unseen modality. WHere unseen modality is assigned to the agnostic channel and seen modalities are asssigned to modality specific input channels, the model below was trained on the following modalities ['FLAIR', 'PD', 'SWI', 'T1', 'T1c', 'T2'] hence, if you have a modality not here you can place in agnostic channel
-In this example we test with ISLES15 (stroke dataset) with a combination of seen and unseen modalities. Unseen modality DWI is placed in agnostic channel: (ISLES15 is publically available to test)
- ```bash
-         # Pre trained agnostic path model:
-         python test.py --datasets_to_test 'ISLES' --modalities_to_test "0_1_2_3" --device_id 1 --trained_on 'TBI_WMH_BRATS_MSSEG_ATLAS' --model_name 'setting_1_agnostic_path' --agnostic_path --agnostic_channel --modality_for_agnostic_channel 'DWI' 
-
-
-         # pre trained agnostic channel (no agnostic path only channel) 
-         python test.py --datasets_to_test 'ISLES' --modalities_to_test "0_1_2_3" --device_id 1 --trained_on 'TBI_WMH_BRATS_MSSEG_ATLAS' --model_name 'setting_1_agnostic_channel' --agnostic_channel --modality_for_agnostic_channel 'DWI'
-
-
-         # pre trained standard model (no agnostic channel or path, hence cannot utilise new modality)
-         python test.py --datasets_to_test 'ISLES' --modalities_to_test "0_1_2" --device_id 1 --trained_on 'TBI_WMH_BRATS_MSSEG_ATLAS' --model_name 'setting_1_standard' --modality_remove 'DWI'
-         
- ```
-
- There are also checkpoints from setting 2 from the paper- where FLAIR was removed during training and used in agnostic channel at test time.
-
-
-
-
-
-
-
-
 ## Model Architecture
 
 The project implements multiple U-Net variants optimized for multi-modal medical image segmentation.
 
 <!-- ![Model Information](diagrams/model_comparison_table.png) -->
-<img src="diagrams/model_comparison_table.png" alt="Model Information" width="600">
+<img src="diagrams/model_comparison_table.png" alt="Model Information" width="250">
 
 **Agn. Path:** Additional agnostic channel and pre processing path for input
 
@@ -159,39 +132,54 @@ The following baselines can be trained/tested and adapted as fit:
 
 
 
+## Quick Use
 
-## Training 
+Use pre trained model for inference on data with seen modalities, unseen modalities and combination of seen and unseen modality. WHere unseen modality is assigned to the agnostic channel and seen modalities are asssigned to modality specific input channels, the model below was trained on the following modalities ['FLAIR', 'PD', 'SWI', 'T1', 'T1c', 'T2'] hence, if you have a modality not here you can place in agnostic channel
+In this example we test with ISLES15 (stroke dataset) with a combination of seen and unseen modalities. Unseen modality DWI is placed in agnostic channel: (ISLES15 is publically available to test). There are a variety of models to choose from in the checkpoint_path_json and can be iniated with the --model_name argument. 
+ ```bash
+         # Pre trained agnostic path model:
+         python test.py --datasets_to_test 'ISLES' --modalities_to_test "0_1_2_3" --device_id 0 --trained_on 'TBI_WMH_BRATS_MSSEG_ATLAS' --model_name 'setting_1_agnostic_path' --agnostic_path --agnostic_channel --modality_for_agnostic_channel 'DWI' 
 
-1. Run training:
+
+         # pre trained agnostic channel (no agnostic path only channel) 
+         python test.py --datasets_to_test 'ISLES' --modalities_to_test "0_1_2_3" --device_id 1 --trained_on 'TBI_WMH_BRATS_MSSEG_ATLAS' --model_name 'setting_1_agnostic_channel' --agnostic_channel --modality_for_agnostic_channel 'DWI'
+
+
+         # pre trained standard model (no agnostic channel or path, hence cannot utilise new modality)
+         python test.py --datasets_to_test 'ISLES' --modalities_to_test "0_1_2" --device_id 1 --trained_on 'TBI_WMH_BRATS_MSSEG_ATLAS' --model_name 'setting_1_standard' --modality_remove 'DWI'
+         
+ ```
+
+ There are also checkpoints from setting 2 from the paper- where FLAIR was removed during training and used in agnostic channel at test time.
+ For testing your own checkpoint set arg --checkpoint to path of where your checkpoint is located and set --model name to None. 
+
+
+
+
+
+
+## Training with Agnostic channel AND path
+
+1. Run training (on predefined train/test split as defined in the config file):
 ```bash
-   python train_class.py --datasets "DATASET1_DATASET2..." --device_id 1 --agnostic_channel True --agnostic_path True --agnostic_chan_augs True
+         python trainer.py --datasets "DATASET1_DATASET2..." --device_id 1 --agnostic_channel True --agnostic_path True --agnostic_chan_augs True --modality_remove None
    ```
 
-2. Finetuning:
+2. For k-fold cross-validation:
 ```bash
-   python train_2.py --device_id 0 --datasets "DATASET1_DATASET2" --load_model_finetune_path ..
-   ```
+       python k_fold_train.py --datasets "DATASET1_DATASET2..." --k_fold 7 --agnostic_channel True --agnostic_path True --agnostic_chan_augs True --modality_remove 'FLAIR'
+```
+To train on just standard model set: --agnostic_channel False and set --agnostic_path False. In this instance the input channels are all modality specific. 
 
-3. For k-fold cross-validation:
+## Finetuning with Agnostic Channel and Path 
+
+1. Finetuning (allow fintune of dataset with seen, unseen, or combinatino of seen and unseen modalities) by utlising the agnostic channel input for previously inseen modalities:
 ```bash
-   python k_fold.py --device_id 0 --datasets "DATASET1_DATASET2" --k_fold 5 
-   ```
+            python train_finetune.py --finetune_dataset "ISLES" --device_id 0 --load_model_finetune_path 'setting_1_agnostic_path' --add_agnostic_path_to_pre_trained_model False --add_agnostic_channel_to_pre_trained_model False --pre_trained_agnostic_path True --pre_trained_agnostic_channel False --new_mod_finetune 'DWI' --datasets_trained_initially 'BRATS_MSSEG_ATLAS_TBI_WMH'  --modality_remove_training_set 'DWI' --modality_remove_validation_set None
 
-## Inference 
-
+```
 
 
-1. Run Inference with pre trained model by author:
-   ```bash
-   python test.py --datasets  --k_fold N
-
-   ```
-
-2. Run Inference with your own trained model:
-   ```bash
-   python test.py --datasets  --k_fold N
-
-   ```
 
 
 **Citation**  

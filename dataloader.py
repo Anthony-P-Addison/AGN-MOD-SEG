@@ -280,6 +280,7 @@ def create_dataloader(
 
 def get_dataloader(
     train_config: None,
+    modality_remove: str,
     database_config: Database_config,
     datasetlist: list[str],
     cropped_input_size: list[int],
@@ -316,7 +317,7 @@ def get_dataloader(
         masks = sorted(glob(os.path.join(mask_path[dataset], "*.*")))
         # select channels to remove from the dataset in question.
         channels_to_remove = get_modalities_drop(
-            dataset, channels_copy[dataset], train_config.modality_remove
+            dataset, channels_copy[dataset], modality_remove
         )
 
         train_loader_one, val_loader[dataset] = create_dataloader(
