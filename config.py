@@ -23,7 +23,7 @@ class Training_config():
     load_pre_trained_model:bool = False  # if true will load pre-train model  
     load_model_path:Path =  None
     ## Remove modality from the training set (can use for testing the agnostic channel)
-    modality_remove = None # Can be: str, list, or None. Single modality (str) or multiple modalities (list) to remove. None if no modality to be dropped 
+    modality_remove = 'FLAIR' # Can be: str, list, or None. Single modality (str) or multiple modalities (list) to remove. None if no modality to be dropped 
     random_drop:int = 1 # 1 for to be dropped and 0 for not to be dropped. 
     #### admin  ####
     wandb_active:bool = True
@@ -51,26 +51,27 @@ class Database_config():
     channels["WMH"] = ["FLAIR", "T1"]
     channels["ISLES2022"] = ['ADC','DWI','FLAIR'] 
     channels["TBI"] = ["FLAIR", "T1", "T2", "SWI"]
-  
-    train_size = {}
-    # size for each database
+
     # training set size
+    train_size = {}
     train_size["BRATS"] = 444
     train_size["ATLAS"] = 459
     train_size["MSSEG"] = 37
-    train_size["ISLES"] = 19
+    train_size["ISLES"] = 0
     train_size["WMH"] = 42
     train_size["ISLES2022"] = 175
+    train_size["TBI"] = 42
+
+    #total size 
     total_size = {}
     total_size["BRATS"] = 484
     total_size["ATLAS"] = 654
     total_size["MSSEG"] = 53
-    total_size["ISLES"] = 28   # test 9 and train 19
+    total_size["ISLES"] = 28   
     total_size["WMH"] = 60
-
-
     total_size["ISLES2022"] = 250   
 
+    #image and seg map paths
     img_path = {}
     seg_path = {}
     img_path["BRATS"] = "data/BRATS/Images"
@@ -86,19 +87,13 @@ class Database_config():
     seg_path["ATLAS"] = "data/ATLAS/Labels"
     img_path["ISLES2022"] = "data/ISLES2022/Images"
     seg_path["ISLES2022"] = "data/ISLES2022/Labels"
-   
     img_path["MSSEG"] = "data/MSSEG/Images"
     seg_path["MSSEG"] = "data/MSSEG/Labels"
     img_path["ISLES"] = "data/ISLES/Images"
     seg_path["ISLES"] = "data/ISLES/Labels"
     img_path["WMH"] = "data/WMH/Images"
     seg_path["WMH"] = "data/WMH/Labels"
-    # img_path["TBI"] = "data/TBI/Images"  
-    # if TBI_multichannel:
-    #     seg_path["TBI"] = "data/TBI_multichannel/Labels" 
-    # else:
-    #     seg_path["TBI"] = "data/TBI/Labels"
-
+   
     #only for test
     val_size = {}
     val_size["BRATS"] = 40 
@@ -108,7 +103,7 @@ class Database_config():
     val_size["ISLES2022"] = 75
     val_size["ISLES"] = 28   
 
-    #masks for each database
+    #brain mask path 
     mask_path = {}
     mask_path["BRATS"] = "data/BRATS/Masks"
     mask_path["ATLAS"] = "data/ATLAS/Masks"
@@ -116,7 +111,7 @@ class Database_config():
     mask_path["ISLES2022"] = "data/ISLES2022/Masks"
     mask_path["WMH"] = "data/WMH/Masks"
     mask_path["ISLES"] = "data/ISLES/Masks"
- 
+
 
 class Test_config():
     save_segs:bool = False  # True to save the segmentation outputs
@@ -151,17 +146,17 @@ class Finetune_config:
 class Augmentation_config:
     ## augmentaitons for the input to agnostic channel.
     ##### Brain Tissue Augmentations #####
-    prob_brain_invert: float = 0.5 
-    prob_brain_mixup: float = 0.5 
+    prob_brain_invert: float = 0.5
+    prob_brain_mixup: float = 0.5
     prob_brain_scale_shift: bool = True
 
     brain_factor_multiply: tuple = (0.8, 1.2)
     brain_factor_intensity: tuple = (-0.2, 0.2)
 
     ##### Pathology Tissue Augmentations #####
-    prob_lesion_switch: float = 0.75 
-    prob_pathology_invert: float = 0.5 
-    prob_pathology_mixup: float = 0.5 
+    prob_lesion_switch: float = 0.75
+    prob_pathology_invert: float = 0.5
+    prob_pathology_mixup: float = 0.5
     prob_tumor_scale_shift: bool = False
 
     tumor_factor_multiply: tuple = (0.8, 1.2)
@@ -173,6 +168,3 @@ class Augmentation_config:
     uniform_scale_shift: bool = False
     uniform_mix_up: float = 0
     uniform_invert: float = 0
-
-
-
